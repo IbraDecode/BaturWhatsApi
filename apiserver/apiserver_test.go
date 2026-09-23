@@ -435,6 +435,21 @@ func TestWSBridge(t *testing.T) {
 		t.Fatalf("first frame not hello: %s", raw)
 	}
 
+	// Subscribe (unfiltered) so events flow.
+	sub, _ := json.Marshal(map[string]string{"op": "subscribe"})
+	if err := c.SendText(wctx, sub); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 20; i++ {
+		raw, err := c.ReceiveBinary(wctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if bytes.Contains(raw, []byte(`"subscribe"`)) {
+			break
+		}
+	}
+
 	// send a command; expect a result (retry once on a transient failure)
 	// plus a streamed message.sent event. The event goroutine and the
 	// command handler run concurrently, so the event may legally arrive
@@ -486,8 +501,8 @@ func TestWSBridge(t *testing.T) {
 	}
 
 	// subscribe filter + sync command
-	sub, _ := json.Marshal(map[string]string{"op": "subscribe", "session": "wsdev"})
-	if err := c.SendText(wctx, sub); err != nil {
+	sub2, _ := json.Marshal(map[string]string{"op": "subscribe", "session": "wsdev"})
+	if err := c.SendText(wctx, sub2); err != nil {
 		t.Fatal(err)
 	}
 	done := false
@@ -662,6 +677,119 @@ func TestWSBridgeChatFilter(t *testing.T) {
 		}
 	}
 	t.Fatal("message.sent never arrived after re-subscribe to real chat")
+}
+
+func TestWSBridgeUnsubscribe(t *testing.T) {
+	dict := token.Default()
+	srv, err := mockserver.New(dict)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dialer := mockserver.Dialer{Srv: srv}
+	b, err := api.New(api.Options{Dict: dict, Store: storage.NewMemory(),
+		BundleSource: func(context.Context, api.Target) (*e2e.PreKeyBundle, error) {
+			return srv.E2EBundle(), nil
+		}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := b.Attach("wsun", dialer, session.TrustedRootAuth(srv.RootPub()),
+		session.DeviceInfo{Platform: "web"}); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := b.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	defer b.Stop(context.Background())
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		if st, err := b.Status("wsun"); err == nil && st.State == api.StateOnline {
+			break
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	acct, err := b.Status("wsun")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := &Server{Batur: b}
+	s, err = New(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := httptest.NewServer(s.srv.Handler)
+	defer ts.Close()
+	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/v1/ws"
+	d := ws.NewDialer(ws.Options{})
+	wctx, wcancel := context.WithTimeout(context.Background(), 12*time.Second)
+	defer wcancel()
+	c, err := d.Dial(wctx, wsURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	if _, err := c.ReceiveBinary(wctx); err != nil {
+		t.Fatal(err)
+	}
+
+	sub, _ := json.Marshal(map[string]string{"op": "subscribe", "session": "wsun", "jid": acct.Account})
+	if err := c.SendText(wctx, sub); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 20; i++ {
+		raw, _ := c.ReceiveBinary(wctx)
+		if bytes.Contains(raw, []byte(`"subscribe"`)) {
+			break
+		}
+	}
+
+	// Send -> message.sent visible.
+	cmd, _ := json.Marshal(map[string]string{"op": "send", "session": "wsun", "to": acct.Account, "text": "on"})
+	if err := c.SendText(wctx, cmd); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 60; i++ {
+		raw, err := c.ReceiveBinary(wctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if bytes.Contains(raw, []byte(`"message.sent"`)) {
+			break
+		}
+		if i == 59 {
+			t.Fatal("message.sent never arrived before unsubscribe")
+		}
+	}
+
+	// Unsubscribe -> send another, event must NOT arrive.
+	unsub, _ := json.Marshal(map[string]string{"op": "unsubscribe"})
+	if err := c.SendText(wctx, unsub); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 20; i++ {
+		raw, _ := c.ReceiveBinary(wctx)
+		if bytes.Contains(raw, []byte(`"unsubscribe"`)) {
+			break
+		}
+	}
+
+	cmd2, _ := json.Marshal(map[string]string{"op": "send", "session": "wsun", "to": acct.Account, "text": "off"})
+	if err := c.SendText(wctx, cmd2); err != nil {
+		t.Fatal(err)
+	}
+	rc, rcancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer rcancel()
+	for {
+		raw, err := c.ReceiveBinary(rc)
+		if err != nil {
+			return // timed out without seeing message.sent -> pass
+		}
+		if bytes.Contains(raw, []byte(`"message.sent"`)) {
+			t.Fatal("message.sent leaked after unsubscribe")
+		}
+	}
 }
 
 func TestWSBridgeTokenAuth(t *testing.T) {

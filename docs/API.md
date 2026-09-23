@@ -83,7 +83,9 @@ carries `media` when converted through `api.OnMessage`).
 ## WebSocket event bridge (`/v1/ws`)
 
 Upgrade path (RFC 6455, text frames). After a successful handshake the
-server sends a `hello`, then expects client command frames.
+server sends a `hello`, then expects client command frames. The bridge
+is **disabled by default**: events only flow after the first `subscribe`;
+`unsubscribe` stops the stream until the next `subscribe`.
 
 ### Server -> client frames
 
@@ -107,7 +109,8 @@ intermediaries and the peer alive (send `ping` to get `pong` at your end).
 | `ping` | — | liveness ping; server replies `pong` |
 | `send` | `session`, `to`, `text` | enqueue a text send; result carries the message id |
 | `sync` | `session` | trigger contacts/chats sync; result when done |
-| `subscribe` | `session`, `jid` | only forward that session's events; `jid` narrows to messages to/from one chat (`""` = all chats) |
+| `subscribe` | `session`, `jid` | enable the bridge and (optionally) narrow to one session and/or one chat (`""` = all) |
+| `unsubscribe` | — | disable the bridge; further events are dropped until the next `subscribe` |
 
 Streaming example (Python):
 

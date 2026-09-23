@@ -20,7 +20,7 @@ var wsConnections atomic.Int64
 
 // wsCommand is a client -> server command frame (JSON text).
 type wsCommand struct {
-	Op      string `json:"op"` // ping|send|sync|subscribe
+	Op      string `json:"op"` // ping|send|sync|subscribe|unsubscribe
 	Session string `json:"session,omitempty"`
 	To      string `json:"to,omitempty"`
 	Text    string `json:"text,omitempty"`
@@ -47,6 +47,7 @@ type wsEventBridge struct {
 	close    chan struct{}
 	once     sync.Once
 	filterMu sync.RWMutex
+	enabled  bool   // start disabled until the client opts in via subscribe
 	session  string // non-empty = forward only one session's events
 	chat     string // non-empty = forward only messages to/from this chat
 }
@@ -125,10 +126,18 @@ func (b *wsEventBridge) loop() {
 			_ = b.send(rep)
 		case "subscribe":
 			b.filterMu.Lock()
+			b.enabled = true
 			b.session = cmd.Session
 			b.chat = cmd.JID
 			b.filterMu.Unlock()
 			_ = b.send(wsEnvelope{Type: "result", Op: "subscribe", Ok: true, Session: cmd.Session, ID: cmd.JID})
+		case "unsubscribe":
+			b.filterMu.Lock()
+			b.enabled = false
+			b.session = ""
+			b.chat = ""
+			b.filterMu.Unlock()
+			_ = b.send(wsEnvelope{Type: "result", Op: "unsubscribe", Ok: true})
 		default:
 			_ = b.send(wsEnvelope{Type: "error", Error: "unknown op " + cmd.Op})
 		}
@@ -180,6 +189,9 @@ func (b *wsEventBridge) stream() {
 func (b *wsEventBridge) wants(ev events.Event) bool {
 	b.filterMu.RLock()
 	defer b.filterMu.RUnlock()
+	if !b.enabled {
+		return false
+	}
 	if b.session != "" && ev.Session != b.session {
 		return false
 	}

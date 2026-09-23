@@ -47,7 +47,7 @@ func main() {
 	var err error
 	switch cmd {
 	case "version":
-		fmt.Printf("BaturWhatsApi %s (%s) %s\n", version.Version, version.Channel, runtime.Version())
+		versionCmd()
 	case "doctor":
 		err = doctor()
 	case "bench":
@@ -75,7 +75,30 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintf(os.Stderr, "usage: batur <version|doctor|bench|demo|serve [--bind addr] [--mock]>\n")
+	fmt.Fprintf(os.Stderr, "usage: batur <version|doctor|bench|demo|serve [--bind addr] [--mock]|keygen>\n")
+}
+
+// versionCmd prints engine identity (version + channel + Go runtime).
+// --json switches to a single-line machine-readable object.
+func versionCmd() {
+	fs := flag.NewFlagSet("version", flag.ExitOnError)
+	asJSON := fs.Bool("json", false, "emit a single JSON document instead of a human-readable line")
+	_ = fs.Parse(os.Args[2:])
+	if *asJSON {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetEscapeHTML(false)
+		_ = enc.Encode(map[string]string{
+			"engine":  "BaturWhatsApi",
+			"version": version.Version,
+			"channel": version.Channel,
+			"go":      runtime.Version(),
+			"goos":    runtime.GOOS,
+			"goarch":  runtime.GOARCH,
+		})
+		return
+	}
+	fmt.Printf("BaturWhatsApi %s (%s) %s %s/%s\n",
+		version.Version, version.Channel, runtime.Version(), runtime.GOOS, runtime.GOARCH)
 }
 
 // applyLogOpts reconfigures the global slog default with the chosen

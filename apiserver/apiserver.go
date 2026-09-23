@@ -15,7 +15,6 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/ibradecode/baturwhatsapi/api"
@@ -27,10 +26,6 @@ import (
 // ErrNoToken means public binding was requested without an API token.
 var ErrNoToken = errors.New("apiserver: BATUR_API_TOKEN required for non-local bind")
 
-type sub struct {
-	ch chan events.Event
-}
-
 // Server wraps an api.Batur instance with HTTP endpoints.
 type Server struct {
 	Batur      *api.Batur
@@ -38,8 +33,6 @@ type Server struct {
 	Token      string // bearer token; empty = require localhost bind
 	EventQueue int    // per-subscriber queue (default 256)
 
-	mu      sync.RWMutex
-	subs    map[*sub]bool
 	srv     *http.Server
 	testURL string // set by tests when routed through httptest
 }
@@ -49,16 +42,12 @@ func New(s *Server) (*Server, error) {
 	if s.Batur == nil {
 		return nil, errors.New("apiserver: nil Batur")
 	}
-	if s.EventQueue <= 0 {
-		s.EventQueue = 256
-	}
 	localhostOnly := s.Bind == "" ||
 		strings.HasPrefix(s.Bind, "127.0.0.1:") ||
 		strings.HasPrefix(s.Bind, "localhost:")
 	if s.Token == "" && !localhostOnly {
 		return nil, ErrNoToken
 	}
-	s.subs = map[*sub]bool{}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/health", s.hHealth)
 	mux.HandleFunc("GET /v1/sessions", s.hSessions)
@@ -257,12 +246,12 @@ func (s *Server) hEvents(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, "streaming unsupported")
 		return
 	}
-	sub := &sub{ch: make(chan events.Event, 256)}
+	ch := make(chan events.Event, 256)
 	bus := s.Batur.Bus()
 	handle, err := bus.Subscribe("*", 256, events.PolicyDropOldest,
 		func(_ context.Context, ev events.Event) {
 			select {
-			case sub.ch <- ev:
+			case ch <- ev:
 			default:
 			}
 		})
@@ -286,7 +275,7 @@ func (s *Server) hEvents(w http.ResponseWriter, r *http.Request) {
 		case <-ticker.C:
 			fmt.Fprint(w, ": ping\n\n")
 			flusher.Flush()
-		case ev := <-sub.ch:
+		case ev := <-ch:
 			data, err := json.Marshal(map[string]any{
 				"seq": ev.Seq, "type": ev.Type, "session": ev.Session,
 				"time": ev.Time, "data": publicData(ev),

@@ -52,8 +52,11 @@ api / session.Request / keepalive pings
 ## Connection lifecycle (state machine)
 
 STOPPED → STARTING → CONNECTING → AUTHENTICATING → SYNCING → ONLINE.
-Failure edges: ONLINE → DEGRADED (inbound silence) → RECONNECTING / ERROR.
-Supervisor restarts sessions on any terminal transition out of ONLINE.
+Failure edges: ONLINE → DEGRADED (inbound silence) → ERROR; supervisor
+reports RECONNECTING while a session waits in its backoff window
+(`Health().State`), then a fresh session object re-enters STARTING.
+RECONNECTING is therefore the fleet-level view of the retry loop while
+per-session machines stay strictly per-connection.
 
 ## Isolation model
 

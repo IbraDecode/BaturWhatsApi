@@ -39,8 +39,10 @@ func TestSyncOverProtocol(t *testing.T) {
 	done := make(chan events.Event, 8)
 	b.Bus().MustSubscribe("sync.*", 8, events.PolicyBlock,
 		func(_ context.Context, ev events.Event) {
-			syncEvents++
-			done <- ev
+			select {
+			case done <- ev:
+			default:
+			}
 		})
 	if err := b.Start(ctx); err != nil {
 		t.Fatal(err)
@@ -72,11 +74,11 @@ func TestSyncOverProtocol(t *testing.T) {
 		select {
 		case <-done:
 			syncEvents++
-			if syncEvents >= 2 {
-				break
-			}
 		default:
 			time.Sleep(20 * time.Millisecond)
+		}
+		if syncEvents >= 2 {
+			break
 		}
 	}
 	if syncEvents < 2 {

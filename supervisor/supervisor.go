@@ -87,6 +87,7 @@ type Supervisor struct {
 	// counters for health
 	retries    map[string]int
 	lastOnline map[string]time.Time
+	phase      map[string]string // "backoff" while waiting to retry
 }
 
 // New builds a supervisor.
@@ -97,6 +98,7 @@ func New(opts Options) *Supervisor {
 		sessions:   map[string]*managed{},
 		retries:    map[string]int{},
 		lastOnline: map[string]time.Time{},
+		phase:      map[string]string{},
 	}
 }
 
@@ -224,6 +226,7 @@ func (sv *Supervisor) manageLoop(ctx context.Context, m *managed) {
 			"session", m.cfg.Session.ID, "in", wait, "reason", err)
 		sv.mu.Lock()
 		sv.retries[m.cfg.Session.ID]++
+		sv.phase[m.cfg.Session.ID] = "backoff"
 		sv.mu.Unlock()
 		backoff = sv.nextBackoff(backoff)
 		timer := time.NewTimer(wait)
@@ -234,6 +237,9 @@ func (sv *Supervisor) manageLoop(ctx context.Context, m *managed) {
 			timer.Stop()
 			return
 		}
+		sv.mu.Lock()
+		delete(sv.phase, m.cfg.Session.ID)
+		sv.mu.Unlock()
 	}
 }
 
@@ -348,13 +354,18 @@ func (sv *Supervisor) Health() map[string]Status {
 	out := make(map[string]Status, len(sv.sessions))
 	for id, m := range sv.sessions {
 		st := Status{ID: id}
+		if sv.phase[id] == "backoff" {
+			st.State = statemachine.Reconnecting
+		}
 		if m.sess != nil {
 			sess := m.sess
-			st.State = sess.State()
+			if st.State == "" {
+				st.State = sess.State()
+			}
 			st.Retries = sv.retries[id]
 			st.LastOnline = sv.lastOnline[id]
 			st.Creds = sess.Credentials()
-		} else {
+		} else if st.State == "" {
 			st.State = statemachine.Stopped
 		}
 		out[id] = st

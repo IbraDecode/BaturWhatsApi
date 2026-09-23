@@ -44,8 +44,8 @@ itself 24/7 (supervisor + automatic recovery).
 - Go 1.27.1 (installed to `~/.local/go`), GOFLAGS: none, CGO off.
 - Memory 2GB — engine idle RSS target < 20MB/session remains plausible
   (no measurements yet; benchmark task queued).
-- Full test suite runs in ~2s; `-race` suite green across all 14
-  packages (commit 2026-09-23).
+- Full test suite ~3s; `-race` green across all 17 packages incl. the
+  API/SSE/sync integration tests (2026-09-23).
 
 ## Repository layout (current)
 

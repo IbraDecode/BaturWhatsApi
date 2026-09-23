@@ -1,6 +1,6 @@
-// Package ws implements a dependency-free WebSocket client (RFC 6455) for
-// BaturWhatsApi transports, plus a small test server used by the engine's
-// protocol-level integration tests.
+// Package ws implements a dependency-free WebSocket implementation for
+// BaturWhatsApi: a client (RFC 6455) for engine transports, a test server,
+// and an Upgrade path used by the API server's real-time event bridge.
 //
 // Scope: binary/text data frames with continuation handling, control frames
 // (ping/pong/close), masked client frames, size limits against memory
@@ -222,6 +222,16 @@ func (c *Conn) SendBinary(ctx context.Context, payload []byte) error {
 	return c.writeFrame(ctx, 0x2, payload)
 }
 
+// SendText writes a single text frame.
+func (c *Conn) SendText(ctx context.Context, payload []byte) error {
+	return c.writeFrame(ctx, 0x1, payload)
+}
+
+// SendPing emits a ping frame (server keep-alive or client liveness).
+func (c *Conn) SendPing(ctx context.Context, payload []byte) error {
+	return c.writeFrame(ctx, 0x9, payload)
+}
+
 // writeFrame emits one FIN-only data/control frame.
 func (c *Conn) writeFrame(ctx context.Context, opcode byte, payload []byte) error {
 	if len(payload) > MaxFrameSize {
@@ -435,9 +445,15 @@ func (c *Conn) readFrame() (frame, error) {
 		return frame{}, err
 	}
 	f := frame{fin: hdr[0]&0x80 != 0, opcode: hdr[0] & 0x0F}
-	if hdr[1]&0x80 != 0 {
-		// A server must not mask frames to us.
-		return frame{}, fmt.Errorf("%w: masked server frame", ErrProtocol)
+	masked := hdr[1]&0x80 != 0
+	if c.masked {
+		// client mode: a server must not mask frames to us
+		if masked {
+			return frame{}, fmt.Errorf("%w: masked server frame", ErrProtocol)
+		}
+	} else if !masked {
+		// server mode: clients must mask their frames
+		return frame{}, fmt.Errorf("%w: unmasked client frame", ErrProtocol)
 	}
 	length := uint64(hdr[1] & 0x7F)
 	switch length {
@@ -460,9 +476,21 @@ func (c *Conn) readFrame() (frame, error) {
 	if length > MaxFrameSize {
 		return frame{}, ErrFrameTooLarge
 	}
+	var key [4]byte
+	if !c.masked {
+		// server mode: the 4-byte masking key precedes the payload
+		if _, err := io.ReadFull(c.br, key[:]); err != nil {
+			return frame{}, err
+		}
+	}
 	payload := make([]byte, length)
 	if _, err := io.ReadFull(c.br, payload); err != nil {
 		return frame{}, err
+	}
+	if !c.masked {
+		for i := range payload {
+			payload[i] ^= key[i%4]
+		}
 	}
 	f.payload = payload
 	return f, nil

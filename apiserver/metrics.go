@@ -75,6 +75,10 @@ func (s *Server) hMetrics(w http.ResponseWriter, r *http.Request) {
 	sb.WriteString("# HELP batur_gc_pause_total_ns Sum of GC pause nanoseconds.\n# TYPE batur_gc_pause_total_ns counter\n")
 	fmt.Fprintf(&sb, "batur_gc_pause_total_ns %d\n", ms.PauseTotalNs)
 
+	sb.WriteString("# HELP batur_ws_connections Live WebSocket event subscribers.\n")
+	sb.WriteString("# TYPE batur_ws_connections gauge\n")
+	fmt.Fprintf(&sb, "batur_ws_connections %d\n", wsConnections.Load())
+
 	// event bus stats
 	if b := s.Batur.Bus(); b != nil {
 		bs := b.Stats()

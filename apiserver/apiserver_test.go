@@ -2,6 +2,7 @@ package apiserver
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"io"
@@ -20,6 +21,7 @@ import (
 	"github.com/ibradecode/baturwhatsapi/session"
 	"github.com/ibradecode/baturwhatsapi/statemachine"
 	"github.com/ibradecode/baturwhatsapi/storage"
+	"github.com/ibradecode/baturwhatsapi/transport/ws"
 )
 
 func newTestServer(t *testing.T, tokenAuth string) (*Server, *mockserver.Server, func()) {
@@ -366,4 +368,210 @@ func TestHistoryEndpoint(t *testing.T) {
 		time.Sleep(50 * time.Millisecond)
 	}
 	t.Fatalf("message not in history endpoint: %s", body)
+}
+
+func TestWSBridge(t *testing.T) {
+	dict := token.Default()
+	srv, err := mockserver.New(dict)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dialer := mockserver.Dialer{Srv: srv}
+	b, err := api.New(api.Options{Dict: dict, Store: storage.NewMemory(),
+		BundleSource: func(context.Context, api.Target) (*e2e.PreKeyBundle, error) {
+			return srv.E2EBundle(), nil
+		}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := b.Attach("wsdev", dialer, session.TrustedRootAuth(srv.RootPub()),
+		session.DeviceInfo{Platform: "web"}); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := b.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	defer b.Stop(context.Background())
+
+	// wait online first so event assertions are deterministic
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		if st, err := b.Status("wsdev"); err == nil && st.State == api.StateOnline {
+			break
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	st, _ := b.Status("wsdev")
+
+	s := &Server{Batur: b}
+	s, err = New(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := httptest.NewServer(s.srv.Handler)
+	defer ts.Close()
+	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/v1/ws"
+
+	d := ws.NewDialer(ws.Options{})
+	wctx, wcancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer wcancel()
+	c, err := d.Dial(wctx, wsURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+
+	// hello must arrive first
+	raw, err := c.ReceiveBinary(wctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var env struct {
+		Type string `json:"type"`
+	}
+	if json.Unmarshal(raw, &env) != nil || env.Type != "hello" {
+		t.Fatalf("first frame not hello: %s", raw)
+	}
+
+	// send a command; expect result ok + a streamed message.sent event
+	cmd, _ := json.Marshal(map[string]string{"op": "send", "session": "wsdev", "to": st.Account, "text": "ws bridge"})
+	if err := c.SendText(wctx, cmd); err != nil {
+		t.Fatal(err)
+	}
+	var gotResult, gotEvent bool
+	var sentID string
+	for i := 0; i < 40 && (!gotResult || !gotEvent); i++ {
+		raw, err := c.ReceiveBinary(wctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var top struct {
+			Type string          `json:"type"`
+			Op   string          `json:"op"`
+			Ok   bool            `json:"ok"`
+			ID   string          `json:"id"`
+			Data json.RawMessage `json:"data"`
+		}
+		if json.Unmarshal(raw, &top) != nil {
+			continue
+		}
+		switch top.Type {
+		case "result":
+			if top.Op == "send" && top.Ok && top.ID != "" {
+				sentID = top.ID
+				gotResult = true
+			}
+		case "message.sent":
+			gotEvent = true
+		}
+	}
+	if !gotResult || sentID == "" {
+		t.Fatal("no send result received over ws")
+	}
+	if !gotEvent {
+		t.Fatal("no message.sent event streamed over ws")
+	}
+
+	// subscribe filter + sync command
+	sub, _ := json.Marshal(map[string]string{"op": "subscribe", "session": "wsdev"})
+	if err := c.SendText(wctx, sub); err != nil {
+		t.Fatal(err)
+	}
+	done := false
+	for i := 0; i < 20 && !done; i++ {
+		raw, err := c.ReceiveBinary(wctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if bytes.Contains(raw, []byte(`"subscribe"`)) && bytes.Contains(raw, []byte(`"ok":true`)) {
+			done = true
+		}
+	}
+	if !done {
+		t.Fatal("no subscribe result received")
+	}
+
+	// sync command returns ok
+	syc, _ := json.Marshal(map[string]string{"op": "sync", "session": "wsdev"})
+	if err := c.SendText(wctx, syc); err != nil {
+		t.Fatal(err)
+	}
+	sawSync := false
+	for i := 0; i < 40 && !sawSync; i++ {
+		raw, err := c.ReceiveBinary(wctx)
+		if err != nil {
+			break
+		}
+		if bytes.Contains(raw, []byte(`"sync"`)) && bytes.Contains(raw, []byte(`"ok":true`)) {
+			sawSync = true
+		}
+	}
+	if !sawSync {
+		t.Fatal("no sync result received over ws")
+	}
+
+	// metrics expose the live connection gauge
+	mr, err := http.Get(ts.URL + "/metrics")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mbody := readAll(t, mr.Body)
+	mr.Body.Close()
+	if !strings.Contains(mbody, "batur_ws_connections 1") {
+		t.Fatalf("ws gauge not exposed: %s", mbody)
+	}
+}
+
+func TestWSBridgeTokenAuth(t *testing.T) {
+	dict := token.Default()
+	srv, err := mockserver.New(dict)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dialer := mockserver.Dialer{Srv: srv}
+	b, err := api.New(api.Options{Dict: dict, Store: storage.NewMemory()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := b.Attach("wsdev", dialer, session.TrustedRootAuth(srv.RootPub()),
+		session.DeviceInfo{Platform: "web"}); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := b.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	defer b.Stop(context.Background())
+	s := &Server{Batur: b, Token: "ws-secret"}
+	s, err = New(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := httptest.NewServer(s.srv.Handler)
+	defer ts.Close()
+	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/v1/ws"
+	d := ws.NewDialer(ws.Options{})
+	wctx, wcancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer wcancel()
+	// without token -> handshake rejected
+	if _, err := d.Dial(wctx, wsURL); err == nil {
+		t.Fatal("upgrade without token succeeded, want rejection")
+	}
+	// with token -> ok
+	d2 := ws.NewDialer(ws.Options{Header: http.Header{"Authorization": {"Bearer ws-secret"}}})
+	c, err := d2.Dial(context.Background(), wsURL)
+	if err != nil {
+		t.Fatalf("upgrade with token failed: %v", err)
+	}
+	defer c.Close()
+	raw, err := c.ReceiveBinary(wctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(raw, []byte(`"hello"`)) {
+		t.Fatalf("no hello after authed upgrade: %s", raw)
+	}
 }

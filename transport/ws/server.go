@@ -16,7 +16,45 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"time"
 )
+
+// Upgrade accepts an HTTP/1.1 upgrade request as a WebSocket server
+// connection. It hijacks the net.Conn and returns a server-mode Conn that
+// reads masked client frames and writes unmasked frames. This lets the API
+// server host real WebSocket event streams without external libraries.
+func Upgrade(w http.ResponseWriter, r *http.Request) (*Conn, error) {
+	key := r.Header.Get("Sec-WebSocket-Key")
+	if !strings.EqualFold(r.Header.Get("Upgrade"), "websocket") || key == "" {
+		return nil, errors.New("ws: not an upgrade request")
+	}
+	hj, ok := w.(http.Hijacker)
+	if !ok {
+		return nil, errors.New("ws: hijack unsupported")
+	}
+	nc, brw, err := hj.Hijack()
+	if err != nil {
+		return nil, err
+	}
+	if err := nc.SetDeadline(time.Time{}); err != nil {
+		nc.Close()
+		return nil, err
+	}
+	resp := "HTTP/1.1 101 Switching Protocols\r\n" +
+		"Upgrade: websocket\r\nConnection: Upgrade\r\n" +
+		"Sec-WebSocket-Accept: " + acceptKey(key) + "\r\n\r\n"
+	if _, err := brw.WriteString(resp); err != nil {
+		nc.Close()
+		return nil, err
+	}
+	if err := brw.Flush(); err != nil {
+		nc.Close()
+		return nil, err
+	}
+	c := newConn(nc, brw.Reader, nil, false)
+	go c.readLoop()
+	return c, nil
+}
 
 // ServerConn is an accepted test server connection.
 type ServerConn struct {

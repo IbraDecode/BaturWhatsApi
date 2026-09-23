@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/rand"
 	"net"
+	"net/http"
 	"strings"
 	"testing"
 	"time"
@@ -221,5 +222,56 @@ func TestBindingHeaderNonNil(t *testing.T) {
 	c := dialClient(t, addr)
 	if len(c.BindingHeader()) == 0 {
 		t.Fatal("binding header must be set for noise channel binding")
+	}
+}
+
+// TestUpgradeServerMode verifies the HTTP upgrade path (as used by the API
+// server) accepts a Dialer client, reads its masked frames, and writes
+// unmasked frames back.
+func TestUpgradeServerMode(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
+		conn, err := Upgrade(w, r)
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		for {
+			raw, err := conn.ReceiveBinary(context.Background())
+			if err != nil {
+				return
+			}
+			if err := conn.SendText(context.Background(), raw); err != nil {
+				return
+			}
+		}
+	})
+	srv := &http.Server{Handler: mux}
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	go srv.Serve(ln)
+	t.Cleanup(func() { srv.Close() })
+
+	d := NewDialer(Options{})
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	c, err := d.Dial(ctx, "ws://"+ln.Addr().String()+"/ws")
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer c.Close()
+
+	msg := []byte("server-mode echo")
+	if err := c.SendText(ctx, msg); err != nil {
+		t.Fatal(err)
+	}
+	got, err := c.ReceiveBinary(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, msg) {
+		t.Fatalf("echo = %q want %q", got, msg)
 	}
 }

@@ -32,7 +32,7 @@ itself 24/7 (supervisor + automatic recovery).
 | Sync engine          | ✅     | resumable stages + snapshot store + auto-sync-on-ready + periodic refresh + REST (/sync,/contacts,/chats) + Prometheus; protocol-verified |
 | Media engine         | ❌     | Phase 3 |
 | Observability        | ✅     | /metrics Prometheus (session state one-hot, retries, online, heap/goroutine/gc, bus counters), structured logs, health API |
-| REST/WS API server   | 🟡     | apiserver v1: health/sessions/iq/text/sync/contacts/chats + SSE + /metrics + sealed storage; WSS event stream + pairing endpoints pending |
+| REST/WS API server   | ✅     | apiserver v1: REST + SSE + **WebSocket event bridge** (send/sync/subscribe, bearer auth, /metrics gauge) + sealed storage; pairing endpoints pending |
 | Testing              | ✅     | 12/12 packages green incl. stress + chaos tests; `-race` full suite CLEAN |
 | Benchmarks           | ✅     | `internal/bench`: 100 idle sessions = 119.8 KiB heap/session, ~5 goroutines/session, 52.7K encrypted IQ round-trips/s single session (19µs/op); node codec 2.2µs enc / 3.2µs dec; race + stress green |
 | CI/CD                | ✅     | GitHub Actions: build, vet, fuzz-smoke tests, race, cross-compile |

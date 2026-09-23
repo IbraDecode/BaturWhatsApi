@@ -56,6 +56,7 @@ func New(s *Server) (*Server, error) {
 	mux.HandleFunc("POST /v1/sessions/{id}/iq", s.hSessionIQ)
 	mux.HandleFunc("POST /v1/sessions/{id}/text", s.hSessionText)
 	mux.HandleFunc("GET /v1/events", s.hEvents)
+	mux.HandleFunc("GET /v1/ws", s.hSessionWS)
 	mux.HandleFunc("GET /metrics", s.hMetrics)
 	mux.HandleFunc("POST /v1/sessions/{id}/sync", s.hSessionSync)
 	mux.HandleFunc("GET /v1/sessions/{id}/contacts", s.hSessionContacts)

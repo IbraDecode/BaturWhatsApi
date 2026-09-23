@@ -58,3 +58,7 @@ Honest register. Anything production-relevant lives here until fixed.
   (byte-level wire tests green).
 - 2026-09-23: Pipe transport EOF propagation after remote close fixed.
 - 2026-09-23: `statemachine.Move` self-deadlock (nested unlock) fixed.
+
+## Bounded-scope notes
+- API-server WS bridge is plain ws:// (no permessage-deflate); terminate WSS upstream and forward /v1/ws. The ws package also enforces unmasked server frames / masked client frames per RFC 6455.
+- Server-mode ws.Un upgrade path is used only by apiserver; engine transport keeps using the heavy-ws client for WhatsApp-style traffic.

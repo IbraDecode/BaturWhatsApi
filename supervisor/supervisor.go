@@ -171,7 +171,8 @@ func (sv *Supervisor) Start(ctx context.Context) error {
 	return nil
 }
 
-// Stop halts all sessions and supervisory loops.
+// Stop halts all sessions and supervisory loops. The wait is bounded so a
+// wedged session can never stall graceful shutdown indefinitely.
 func (sv *Supervisor) Stop(ctx context.Context) error {
 	sv.mu.Lock()
 	if sv.runCancel != nil {
@@ -182,18 +183,26 @@ func (sv *Supervisor) Stop(ctx context.Context) error {
 		mg = append(mg, m)
 	}
 	sv.mu.Unlock()
+	waitCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
 	var lastErr error
 	for _, m := range mg {
 		if m.cancel != nil {
 			m.cancel()
 		}
 		if m.sess != nil {
-			if err := m.sess.Stop(ctx); err != nil {
+			if err := m.sess.Stop(waitCtx); err != nil {
 				lastErr = err
 			}
 		}
 	}
-	sv.wg.Wait()
+	done := make(chan struct{})
+	go func() { sv.wg.Wait(); close(done) }()
+	select {
+	case <-done:
+	case <-waitCtx.Done():
+		sv.opts.Logger.Warn("supervisor stop deadline exceeded; abandoning wedged loops")
+	}
 	sv.opts.Logger.Info("supervisor stopped")
 	return lastErr
 }

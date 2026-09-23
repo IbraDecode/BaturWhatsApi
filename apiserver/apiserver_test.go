@@ -999,3 +999,25 @@ func TestSSEFilter(t *testing.T) {
 		}
 	}
 }
+
+func TestMaxBodyBytes(t *testing.T) {
+	s, _, cleanup, _ := newTestServerEx(t, "", false)
+	defer cleanup()
+	// Override limit to 256 bytes so we don't need to send 1MiB in a test.
+	s.MaxBodyBytes = 256
+	ts := httptest.NewServer(s.srv.Handler)
+	defer ts.Close()
+	big := make([]byte, 4096)
+	for i := range big {
+		big[i] = 'x'
+	}
+	resp, err := http.Post(ts.URL+"/v1/sessions/http-dev/text", "application/json", strings.NewReader(`{"to":"x","text":"`+string(big)+`"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusRequestEntityTooLarge {
+		b1, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, b1)
+	}
+}

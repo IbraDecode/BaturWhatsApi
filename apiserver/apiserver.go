@@ -30,10 +30,11 @@ var ErrNoToken = errors.New("apiserver: BATUR_API_TOKEN required for non-local b
 
 // Server wraps an api.Batur instance with HTTP endpoints.
 type Server struct {
-	Batur      *api.Batur
-	Bind       string // ":8080" etc
-	Token      string // bearer token; empty = require localhost bind
-	EventQueue int    // per-subscriber queue (default 256)
+	Batur        *api.Batur
+	Bind         string // ":8080" etc
+	Token        string // bearer token; empty = require localhost bind
+	EventQueue   int    // per-subscriber queue (default 256)
+	MaxBodyBytes int64  // cap POST request body size; 0 = default 1 MiB
 
 	srv     *http.Server
 	testURL string // set by tests when routed through httptest
@@ -124,6 +125,14 @@ func (s *Server) auth(next http.Handler) http.Handler {
 	})
 }
 
+// bodyLimit returns the configured POST body cap (default 1 MiB).
+func (s *Server) bodyLimit() int64 {
+	if s.MaxBodyBytes > 0 {
+		return s.MaxBodyBytes
+	}
+	return 1 << 20
+}
+
 // ListenAndServe starts the server (blocks until ctx cancels).
 func (s *Server) ListenAndServe(ctx context.Context) error {
 	errCh := make(chan error, 1)
@@ -208,8 +217,14 @@ type nodeJSON struct {
 
 func (s *Server) hSessionIQ(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
+	r.Body = http.MaxBytesReader(w, r.Body, s.bodyLimit())
 	var req iqRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		var max *http.MaxBytesError
+		if errors.As(err, &max) {
+			writeErr(w, http.StatusRequestEntityTooLarge, "body too large")
+			return
+		}
 		writeErr(w, http.StatusBadRequest, "bad request json")
 		return
 	}
@@ -261,8 +276,18 @@ type textRequest struct {
 }
 
 func (s *Server) hSessionText(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, s.bodyLimit())
 	var req textRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.To == "" {
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		var max *http.MaxBytesError
+		if errors.As(err, &max) {
+			writeErr(w, http.StatusRequestEntityTooLarge, "body too large")
+			return
+		}
+		writeErr(w, http.StatusBadRequest, "bad request json")
+		return
+	}
+	if req.To == "" {
 		writeErr(w, http.StatusBadRequest, "to/text required")
 		return
 	}

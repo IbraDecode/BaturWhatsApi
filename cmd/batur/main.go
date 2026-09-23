@@ -354,6 +354,7 @@ func serve() error {
 	mediaDemo := fs.Bool("media-demo", false, "with --mock: additionally push an <image/> message right after connect")
 	logLevel := fs.String("log-level", "info", "log level: debug|info|warn|error")
 	logFormat := fs.String("log-format", "text", "log format: text|json")
+	maxBody := fs.Int("max-body-bytes", 1<<20, "cap on POST request body bytes (HTTP 413 when exceeded)")
 	_ = fs.Parse(os.Args[2:])
 	if err := applyLogOpts(*logLevel, *logFormat); err != nil {
 		return err
@@ -418,6 +419,7 @@ func serve() error {
 	}
 	apiSrv, err := apiserver.New(&apiserver.Server{
 		Batur: b, Bind: *bind, Token: os.Getenv("BATUR_API_TOKEN"),
+		MaxBodyBytes: int64(*maxBody),
 	})
 	if err != nil {
 		return err

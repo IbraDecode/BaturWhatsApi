@@ -47,6 +47,7 @@ make bench       # codec / crypto micro-benchmarks
 go run ./cmd/batur demo
 go run ./cmd/batur doctor
 go run ./cmd/batur serve --mock --bind 127.0.0.1:8080   # REST + SSE API
+go run ./cmd/batur serve --mock --media-demo             # additionally pushes an image message
 ```
 
 ## Embedding (library mode)

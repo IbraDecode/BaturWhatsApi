@@ -235,6 +235,7 @@ func serve() error {
 	sealFile := fs.String("seal-key-file", "", "file containing the master key hex")
 	history := fs.Bool("history", true, "persist bounded per-chat message history")
 	sync := fs.Bool("sync", false, "auto-sync contacts/chats on session ready")
+	mediaDemo := fs.Bool("media-demo", false, "with --mock: additionally push an <image/> message right after connect")
 	_ = fs.Parse(os.Args[2:])
 
 	dict := token.Default()
@@ -274,6 +275,7 @@ func serve() error {
 		if err != nil {
 			return err
 		}
+		srv.MediaDemo = *mediaDemo
 		ao.BundleSource = func(context.Context, api.Target) (*e2e.PreKeyBundle, error) {
 			return srv.E2EBundle(), nil
 		}

@@ -72,6 +72,10 @@ History is a bounded ring (256/chat) with ack tracking
 data: {"seq":9,"type":"message.sent","session":"mock-1","time":"...","data":{...}}
 ```
 
+Tip: run `batur serve --mock --media-demo` to push a synthetic image into
+the local session's history so you can query it back through this endpoint
+and the `/v1/ws` bridge.
+
 `data` is the public domain payload of that event type; for inbound engine
 nodes it is the raw protocol node as-is (see KNOWN_ISSUES — inbound media
 carries `media` when converted through `api.OnMessage`).

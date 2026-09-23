@@ -286,7 +286,10 @@ func (d *Decoder) readPacked8(tag byte) (string, error) {
 		sb.WriteByte(c2)
 	}
 	if head&0x80 != 0 {
-		// Odd length: the last byte is pad.
+		// Odd length: the last nibble is pad.
+		if sb.Len() == 0 {
+			return "", fmt.Errorf("%w: odd-length string with no content", ErrInvalidPacked)
+		}
 		return sb.String()[:sb.Len()-1], nil
 	}
 	return sb.String(), nil

@@ -35,7 +35,7 @@ Status: TODO / IN_PROGRESS / BLOCKED / DONE.
 | T-205 | Metrics endpoint (Prometheus) + structured health | DONE | /metrics text/0.0.4 (T-205, 2026-09-23) |
 | T-206 | Group/newsletter domain models + operations | TODO |
 | T-207 | Dockerfile + systemd/24/7 deployment kit | IN_PROGRESS | Dockerfile (scratch+CGO=0) + docs/deploy (unit, keygen, TLS note); image build not locally testable (no docker) |
-| T-208 | Protocol fuzz corpus + regression fixtures from real captures | TODO |
+| T-208 | Protocol fuzz corpus + regression fixtures from real captures | IN_PROGRESS | Go fuzz targets for codec decoder/encoder + pb wire (native -fuzz); crash fixture committed; real-capture regressions pending (needs live device) |
 
 ## P3 — polish
 

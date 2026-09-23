@@ -62,3 +62,6 @@ Honest register. Anything production-relevant lives here until fixed.
 ## Bounded-scope notes
 - API-server WS bridge is plain ws:// (no permessage-deflate); terminate WSS upstream and forward /v1/ws. The ws package also enforces unmasked server frames / masked client frames per RFC 6455.
 - Server-mode ws.Un upgrade path is used only by apiserver; engine transport keeps using the heavy-ws client for WhatsApp-style traffic.
+
+## Security/robustness fixes
+- [T-208] Fuzzing found & fixed a decoder crash: packed-string with odd-length flag and zero content could panic with a negative slice (`decoder.go`). Regression fixture committed under protocol/binary/testdata/fuzz/. 218K+ decode execs now clean.

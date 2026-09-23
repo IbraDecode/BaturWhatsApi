@@ -25,7 +25,7 @@ POST /v1/sessions/{id}/sync         resumable contacts/chats sync
 GET  /v1/sessions/{id}/contacts     synced contacts snapshot
 GET  /v1/sessions/{id}/chats        synced chats snapshot
 GET  /v1/sessions/{id}/history      per-chat history (?chat=jid&limit=n&cursor=o)
-GET  /v1/events                     Server-Sent Events (all types)
+GET  /v1/events                     Server-Sent Events (all types; ?session=&chat= narrow)
 GET  /v1/ws                         WebSocket event bridge (see below)
 GET  /metrics                       Prometheus text endpoint (+ ws gauge)
 ```

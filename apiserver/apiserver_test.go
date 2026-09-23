@@ -967,3 +967,35 @@ func TestHistoryPagination(t *testing.T) {
 		t.Fatalf("paginated coverage %d < %d", len(seen), N)
 	}
 }
+
+func TestSSEFilter(t *testing.T) {
+	s, _, cleanup, b := newTestServerEx(t, "", false)
+	defer cleanup()
+	if err := b.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	waitOnlineSimple(t, s)
+	// subscribe SSE with a wrong chat filter: nothing should arrive for ~700ms
+	req, _ := http.NewRequest("GET", s.testURL+"/v1/events?chat=999@s.whatsapp.net", nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	scanner := bufio.NewScanner(resp.Body)
+	deadline := time.After(700 * time.Millisecond)
+	for {
+		select {
+		case <-deadline:
+			return // no message.* event leaked through filter -> pass
+		default:
+		}
+		if !scanner.Scan() {
+			t.Fatal("SSE closed prematurely")
+		}
+		line := scanner.Text()
+		if strings.Contains(line, `"message.sent"`) {
+			t.Fatalf("message.sent leaked through %s chat filter: %s", "999@s.whatsapp.net", line)
+		}
+	}
+}

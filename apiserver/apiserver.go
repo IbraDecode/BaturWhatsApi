@@ -363,17 +363,31 @@ func (s *Server) hSessionHistory(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"chat": chat, "messages": page, "next_cursor": next})
 }
 
-// hEvents streams engine events as Server-Sent Events.
+// hEvents streams engine events as Server-Sent Events. Optional
+// query params narrow the stream:
+//
+//	?session=<id>  only that session's events
+//	?chat=<jid>    only events whose chat JID matches (inbound "from"
+//	               or outbound "to" on the underlying node, or
+//	               api.Message.Chat.JID)
 func (s *Server) hEvents(w http.ResponseWriter, r *http.Request) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		writeErr(w, http.StatusInternalServerError, "streaming unsupported")
 		return
 	}
+	sessionFilter := r.URL.Query().Get("session")
+	chatFilter := r.URL.Query().Get("chat")
 	ch := make(chan events.Event, 256)
 	bus := s.Batur.Bus()
 	handle, err := bus.Subscribe("*", 256, events.PolicyDropOldest,
 		func(_ context.Context, ev events.Event) {
+			if sessionFilter != "" && ev.Session != sessionFilter {
+				return
+			}
+			if chatFilter != "" && evChat(ev) != chatFilter {
+				return
+			}
 			select {
 			case ch <- ev:
 			default:

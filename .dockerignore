@@ -1,0 +1,17 @@
+# .dockerignore — keep the build context small for the multi-stage image.
+# Without this, every `COPY . .` ships the entire repo (.git, docs,
+# fuzz corpus, testdata, examples, ...) to the build stage.
+.git
+.gitignore
+.github
+.idea
+.vscode
+*.md
+docs/
+examples/
+storage-adapters/
+internal/bench/
+**/*_test.go
+**/testdata/
+fuzz/
+*.log

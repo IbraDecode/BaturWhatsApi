@@ -31,10 +31,11 @@ var ErrNoToken = errors.New("apiserver: BATUR_API_TOKEN required for non-local b
 // Server wraps an api.Batur instance with HTTP endpoints.
 type Server struct {
 	Batur        *api.Batur
-	Bind         string // ":8080" etc
-	Token        string // bearer token; empty = require localhost bind
-	EventQueue   int    // per-subscriber queue (default 256)
-	MaxBodyBytes int64  // cap POST request body size; 0 = default 1 MiB
+	Bind       string // ":8080" etc
+	Token      string // bearer token; empty = require localhost bind
+	EventQueue int    // per-subscriber queue (default 256)
+	MaxBodyBytes int64 // cap POST request body size; 0 = default 1 MiB
+	ReadTimeout time.Duration // HTTP ReadTimeout; 0 = default 15s
 
 	srv     *http.Server
 	testURL string // set by tests when routed through httptest
@@ -73,6 +74,9 @@ func New(s *Server) (*Server, error) {
 		Handler:      s.auth(mux),
 		ReadTimeout:  15 * time.Second,
 		WriteTimeout: 0, // SSE: managed per-stream
+	}
+	if s.ReadTimeout > 0 {
+		s.srv.ReadTimeout = s.ReadTimeout
 	}
 	s.conns = make(map[*ws.Conn]struct{})
 	return s, nil

@@ -12,6 +12,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -57,25 +58,25 @@ func main() {
 	case "serve":
 		err = serve()
 	case "keygen":
-		key := make([]byte, 32)
-		_, rerr := rand.Read(key)
-		if rerr != nil {
-			err = rerr
-		} else {
-			fmt.Printf("%x\n", key)
-		}
+		err = keygen()
 	default:
 		usage()
 		os.Exit(2)
 	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
+		// ErrSkip is the soft signal emitted by `batur doctor` when the
+		// caller explicitly opted out of a check via --skip-engine /
+		// --skip-e2e; exit 2 so a CI gate can tell "skipped" from "failed".
+		if errors.Is(err, ErrSkipped) {
+			os.Exit(2)
+		}
 		os.Exit(1)
 	}
 }
 
 func usage() {
-	fmt.Fprintf(os.Stderr, "usage: batur <version|doctor|bench|demo|serve [--bind addr] [--mock]|keygen>\n")
+	fmt.Fprintf(os.Stderr, "usage: batur <version|doctor|bench|demo|serve [--bind addr] [--mock]|keygen [--output-file PATH]>\n")
 }
 
 // versionCmd prints engine identity (version + channel + Go runtime).
@@ -100,6 +101,12 @@ func versionCmd() {
 	fmt.Printf("BaturWhatsApi %s (%s) %s %s/%s\n",
 		version.Version, version.Channel, runtime.Version(), runtime.GOOS, runtime.GOARCH)
 }
+
+// ErrSkipped is a sentinel returned by subcommands when their work was
+// deliberately opted out (e.g. `batur doctor --skip-engine`). main()
+// translates it into exit code 2 so a CI gate can distinguish "skipped"
+// from "failed" (exit 1) or "ok" (exit 0).
+var ErrSkipped = errors.New("skipped")
 
 // applyLogOpts reconfigures the global slog default with the chosen
 // level and format. Called from serve() before any logger is in use.
@@ -245,6 +252,9 @@ func doctor() error {
 	} else {
 		fmt.Println("e2e self-check: skipped")
 	}
+	if *skipEngine && *skipE2E {
+		return ErrSkipped
+	}
 	return nil
 }
 
@@ -315,6 +325,34 @@ func bench() error {
 	return nil
 }
 
+// keygen generates a 32-byte (64-hex) master key suitable for the
+// --seal-key flag / BATUR_MASTER_KEY env. With --output-file it writes
+// the key atomically with 0600 perms instead of printing it.
+func keygen() error {
+	fs := flag.NewFlagSet("keygen", flag.ExitOnError)
+	output := fs.String("output-file", "", "write the key to this path with 0600 perms (atomic temp+rename)")
+	_ = fs.Parse(os.Args[2:])
+	key := make([]byte, 32)
+	if _, err := rand.Read(key); err != nil {
+		return err
+	}
+	hexed := fmt.Sprintf("%x\n", key)
+	if *output == "" {
+		fmt.Print(hexed)
+		return nil
+	}
+	tmp := *output + ".tmp"
+	if err := os.WriteFile(tmp, []byte(hexed), 0o600); err != nil {
+		return err
+	}
+	if err := os.Rename(tmp, *output); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	fmt.Fprintf(os.Stderr, "wrote 32-byte master key to %s (0600)\n", *output)
+	return nil
+}
+
 func demo() error {
 	dict := token.Default()
 	srv, err := mockserver.New(dict)
@@ -378,6 +416,7 @@ func serve() error {
 	logLevel := fs.String("log-level", "info", "log level: debug|info|warn|error")
 	logFormat := fs.String("log-format", "text", "log format: text|json")
 	maxBody := fs.Int("max-body-bytes", 1<<20, "cap on POST request body bytes (HTTP 413 when exceeded)")
+	readTimeout := fs.Duration("http-read-timeout", 15*time.Second, "HTTP server ReadTimeout (0 = no limit)")
 	_ = fs.Parse(os.Args[2:])
 	if err := applyLogOpts(*logLevel, *logFormat); err != nil {
 		return err
@@ -443,12 +482,13 @@ func serve() error {
 	apiSrv, err := apiserver.New(&apiserver.Server{
 		Batur: b, Bind: *bind, Token: os.Getenv("BATUR_API_TOKEN"),
 		MaxBodyBytes: int64(*maxBody),
+		ReadTimeout:  *readTimeout,
 	})
 	if err != nil {
 		return err
 	}
 	slog.Info("HTTP API listening", "bind", *bind, "auth", os.Getenv("BATUR_API_TOKEN") != "",
-		"history", *history, "sync", *sync, "max_body_bytes", *maxBody)
+		"history", *history, "sync", *sync, "max_body_bytes", *maxBody, "read_timeout", readTimeout.String())
 	go func() {
 		if err := apiSrv.ListenAndServe(ctx); err != nil {
 			slog.Error("http server", "err", err)

@@ -50,9 +50,10 @@ type wsEventBridge struct {
 	close    chan struct{}
 	once     sync.Once
 	filterMu sync.RWMutex
-	enabled  bool   // start disabled until the client opts in via subscribe
-	session  string // non-empty = forward only one session's events
-	chat     string // non-empty = forward only messages to/from this chat
+	enabled  bool          // start disabled until the client opts in via subscribe
+	session  string        // non-empty = forward only one session's events
+	chat     string        // non-empty = forward only messages to/from this chat
+	ping     time.Duration // keepalive interval; 0 = default 25s
 }
 
 // hSessionWS upgrades /v1/ws and runs the bridge until the peer disconnects.
@@ -65,7 +66,7 @@ func (s *Server) hSessionWS(w http.ResponseWriter, r *http.Request) {
 	wsConnections.Add(1)
 	defer wsConnections.Add(-1)
 
-	b := &wsEventBridge{conn: conn, batur: s.Batur, close: make(chan struct{})}
+	b := &wsEventBridge{conn: conn, batur: s.Batur, close: make(chan struct{}), ping: s.WSPingInterval}
 	s.trackConn(conn)
 	defer s.untrackConn(conn)
 	hello := wsEnvelope{Type: "hello", Data: map[string]any{"engine": "baturwhatsapi", "version": version.Version}}
@@ -163,7 +164,11 @@ func (b *wsEventBridge) stream() {
 		return
 	}
 	defer handle.Unsubscribe()
-	ticker := time.NewTicker(25 * time.Second)
+	interval := b.ping
+	if interval <= 0 {
+		interval = 25 * time.Second
+	}
+	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {
 		select {

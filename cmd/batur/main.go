@@ -38,8 +38,13 @@ import (
 )
 
 func main() {
+	showVersion := flag.Bool("version", false, "print engine identity and exit")
 	flag.Usage = usage
 	flag.Parse()
+	if *showVersion {
+		versionCmd()
+		return
+	}
 	args := flag.Args()
 	cmd := "help"
 	if len(args) > 0 {
@@ -417,6 +422,7 @@ func serve() error {
 	logFormat := fs.String("log-format", "text", "log format: text|json")
 	maxBody := fs.Int("max-body-bytes", 1<<20, "cap on POST request body bytes (HTTP 413 when exceeded)")
 	readTimeout := fs.Duration("http-read-timeout", 15*time.Second, "HTTP server ReadTimeout (0 = no limit)")
+	wsPing := fs.Duration("ws-ping-interval", 25*time.Second, "WS bridge keepalive ping interval (0 disables)")
 	_ = fs.Parse(os.Args[2:])
 	if err := applyLogOpts(*logLevel, *logFormat); err != nil {
 		return err
@@ -481,14 +487,16 @@ func serve() error {
 	}
 	apiSrv, err := apiserver.New(&apiserver.Server{
 		Batur: b, Bind: *bind, Token: os.Getenv("BATUR_API_TOKEN"),
-		MaxBodyBytes: int64(*maxBody),
-		ReadTimeout:  *readTimeout,
+		MaxBodyBytes:   int64(*maxBody),
+		ReadTimeout:    *readTimeout,
+		WSPingInterval: *wsPing,
 	})
 	if err != nil {
 		return err
 	}
 	slog.Info("HTTP API listening", "bind", *bind, "auth", os.Getenv("BATUR_API_TOKEN") != "",
-		"history", *history, "sync", *sync, "max_body_bytes", *maxBody, "read_timeout", readTimeout.String())
+		"history", *history, "sync", *sync, "max_body_bytes", *maxBody, "read_timeout", readTimeout.String(),
+		"ws_ping_interval", wsPing.String())
 	go func() {
 		if err := apiSrv.ListenAndServe(ctx); err != nil {
 			slog.Error("http server", "err", err)

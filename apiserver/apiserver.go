@@ -7,12 +7,15 @@
 package apiserver
 
 import (
+	"bufio"
 	"context"
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
+	"net"
 	"net/http"
 	"strings"
 	"sync"
@@ -30,12 +33,13 @@ var ErrNoToken = errors.New("apiserver: BATUR_API_TOKEN required for non-local b
 
 // Server wraps an api.Batur instance with HTTP endpoints.
 type Server struct {
-	Batur        *api.Batur
-	Bind         string        // ":8080" etc
-	Token        string        // bearer token; empty = require localhost bind
-	EventQueue   int           // per-subscriber queue (default 256)
-	MaxBodyBytes int64         // cap POST request body size; 0 = default 1 MiB
-	ReadTimeout  time.Duration // HTTP ReadTimeout; 0 = default 15s
+	Batur          *api.Batur
+	Bind           string        // ":8080" etc
+	Token          string        // bearer token; empty = require localhost bind
+	EventQueue     int           // per-subscriber queue (default 256)
+	MaxBodyBytes   int64         // cap POST request body size; 0 = default 1 MiB
+	ReadTimeout    time.Duration // HTTP ReadTimeout; 0 = default 15s
+	WSPingInterval time.Duration // WS bridge keepalive ping; 0 = default 25s
 
 	srv     *http.Server
 	testURL string // set by tests when routed through httptest
@@ -72,7 +76,7 @@ func New(s *Server) (*Server, error) {
 	mux.HandleFunc("GET /v1/sessions/{id}/history/{msgID}", s.hSessionHistoryOne)
 	s.srv = &http.Server{
 		Addr:         s.Bind,
-		Handler:      s.auth(mux),
+		Handler:      s.logRequests(s.auth(mux)),
 		ReadTimeout:  15 * time.Second,
 		WriteTimeout: 0, // SSE: managed per-stream
 	}
@@ -109,6 +113,69 @@ func (s *Server) closeConnections() {
 	for _, c := range cs {
 		_ = c.Close()
 	}
+}
+
+// logRequests wraps an http.Handler and emits one structured slog line
+// per request (method, path, status, latency, bytes). Health is skipped
+// to keep the noise floor down.
+func (s *Server) logRequests(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/health" {
+			next.ServeHTTP(w, r)
+			return
+		}
+		start := time.Now()
+		rec := &statusRecorder{ResponseWriter: w, status: 200}
+		next.ServeHTTP(rec, r)
+		slog.Info("http",
+			"method", r.Method,
+			"path", r.URL.Path,
+			"status", rec.status,
+			"latency_ms", time.Since(start).Milliseconds(),
+			"bytes", rec.bytes,
+		)
+	})
+}
+
+// statusRecorder wraps http.ResponseWriter to capture the response status
+// code and total bytes written for the access log.
+type statusRecorder struct {
+	http.ResponseWriter
+	status int
+	bytes  int
+}
+
+func (s *statusRecorder) WriteHeader(c int) {
+	s.status = c
+	s.ResponseWriter.WriteHeader(c)
+}
+
+func (s *statusRecorder) Write(b []byte) (int, error) {
+	if s.status == 0 {
+		s.status = 200
+	}
+	n, err := s.ResponseWriter.Write(b)
+	s.bytes += n
+	return n, err
+}
+
+// Flush delegates to the embedded ResponseWriter so SSE / WS upgrade
+// handlers, which type-assert http.Flusher, keep working through the
+// recording wrapper.
+func (s *statusRecorder) Flush() {
+	if f, ok := s.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+// Hijack delegates to the embedded ResponseWriter so ws.Upgrade, which
+// type-asserts http.Hijacker, still works through the recording wrapper.
+// The status/byte accounting stops at that point.
+func (s *statusRecorder) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	if h, ok := s.ResponseWriter.(http.Hijacker); ok {
+		return h.Hijack()
+	}
+	return nil, nil, errors.New("apiserver: underlying ResponseWriter is not an http.Hijacker")
 }
 
 func (s *Server) auth(next http.Handler) http.Handler {

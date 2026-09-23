@@ -535,6 +535,135 @@ func TestWSBridge(t *testing.T) {
 	}
 }
 
+func TestWSBridgeChatFilter(t *testing.T) {
+	dict := token.Default()
+	srv, err := mockserver.New(dict)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dialer := mockserver.Dialer{Srv: srv}
+	b, err := api.New(api.Options{Dict: dict, Store: storage.NewMemory(),
+		BundleSource: func(context.Context, api.Target) (*e2e.PreKeyBundle, error) {
+			return srv.E2EBundle(), nil
+		}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := b.Attach("wsflt", dialer, session.TrustedRootAuth(srv.RootPub()),
+		session.DeviceInfo{Platform: "web"}); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := b.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	defer b.Stop(context.Background())
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		if st, err := b.Status("wsflt"); err == nil && st.State == api.StateOnline {
+			break
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	acct, err := b.Status("wsflt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if acct.Account == "" {
+		t.Fatal("online without account")
+	}
+
+	s := &Server{Batur: b}
+	s, err = New(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := httptest.NewServer(s.srv.Handler)
+	defer ts.Close()
+	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/v1/ws"
+
+	d := ws.NewDialer(ws.Options{})
+	wctx, wcancel := context.WithTimeout(context.Background(), 12*time.Second)
+	defer wcancel()
+	c, err := d.Dial(wctx, wsURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	if _, err := c.ReceiveBinary(wctx); err != nil { // hello
+		t.Fatal(err)
+	}
+
+	// Subscribe filtered to an unrelated chat JID: send results still flow,
+	// but message events from the real account must NOT.
+	other := "999@s.whatsapp.net"
+	sub, _ := json.Marshal(map[string]string{"op": "subscribe", "session": "wsflt", "jid": other})
+	if err := c.SendText(wctx, sub); err != nil {
+		t.Fatal(err)
+	}
+	gotSub := false
+	for i := 0; i < 20 && !gotSub; i++ {
+		raw, err := c.ReceiveBinary(wctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if bytes.Contains(raw, []byte(`"subscribe"`)) {
+			gotSub = true
+		}
+	}
+	if !gotSub {
+		t.Fatal("no subscribe result")
+	}
+
+	// send to the real account: expect a send result but NO message.sent event.
+	cmd, _ := json.Marshal(map[string]string{"op": "send", "session": "wsflt", "to": acct.Account, "text": "filter me"})
+	if err := c.SendText(wctx, cmd); err != nil {
+		t.Fatal(err)
+	}
+	sawResult, sawEvent := false, false
+	rc, rcancel := context.WithTimeout(context.Background(), 5*time.Second)
+	for !sawResult {
+		raw, err := c.ReceiveBinary(rc)
+		if err != nil {
+			break
+		}
+		if bytes.Contains(raw, []byte(`"message.sent"`)) {
+			sawEvent = true
+		}
+		if bytes.Contains(raw, []byte(`"send"`)) && bytes.Contains(raw, []byte(`"ok":true`)) {
+			sawResult = true
+		}
+	}
+	rcancel()
+	if !sawResult {
+		t.Fatal("no send result under chat filter")
+	}
+	if sawEvent {
+		t.Fatalf("message.sent leaked through %s chat filter", other)
+	}
+
+	// Re-subscribe to the real chat and verify events flow again.
+	sub2, _ := json.Marshal(map[string]string{"op": "subscribe", "session": "wsflt", "jid": acct.Account})
+	if err := c.SendText(wctx, sub2); err != nil {
+		t.Fatal(err)
+	}
+	cmd2, _ := json.Marshal(map[string]string{"op": "send", "session": "wsflt", "to": acct.Account, "text": "show me"})
+	if err := c.SendText(wctx, cmd2); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 60; i++ {
+		raw, err := c.ReceiveBinary(wctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if bytes.Contains(raw, []byte(`"message.sent"`)) {
+			return
+		}
+	}
+	t.Fatal("message.sent never arrived after re-subscribe to real chat")
+}
+
 func TestWSBridgeTokenAuth(t *testing.T) {
 	dict := token.Default()
 	srv, err := mockserver.New(dict)

@@ -11,6 +11,7 @@ import (
 	"github.com/ibradecode/baturwhatsapi/api"
 	"github.com/ibradecode/baturwhatsapi/events"
 	"github.com/ibradecode/baturwhatsapi/internal/version"
+	"github.com/ibradecode/baturwhatsapi/protocol/binary"
 	"github.com/ibradecode/baturwhatsapi/transport/ws"
 )
 
@@ -47,6 +48,7 @@ type wsEventBridge struct {
 	once     sync.Once
 	filterMu sync.RWMutex
 	session  string // non-empty = forward only one session's events
+	chat     string // non-empty = forward only messages to/from this chat
 }
 
 // hSessionWS upgrades /v1/ws and runs the bridge until the peer disconnects.
@@ -124,8 +126,9 @@ func (b *wsEventBridge) loop() {
 		case "subscribe":
 			b.filterMu.Lock()
 			b.session = cmd.Session
+			b.chat = cmd.JID
 			b.filterMu.Unlock()
-			_ = b.send(wsEnvelope{Type: "result", Op: "subscribe", Ok: true, Session: cmd.Session})
+			_ = b.send(wsEnvelope{Type: "result", Op: "subscribe", Ok: true, Session: cmd.Session, ID: cmd.JID})
 		default:
 			_ = b.send(wsEnvelope{Type: "error", Error: "unknown op " + cmd.Op})
 		}
@@ -177,7 +180,29 @@ func (b *wsEventBridge) stream() {
 func (b *wsEventBridge) wants(ev events.Event) bool {
 	b.filterMu.RLock()
 	defer b.filterMu.RUnlock()
-	return b.session == "" || ev.Session == b.session
+	if b.session != "" && ev.Session != b.session {
+		return false
+	}
+	if b.chat != "" && evChat(ev) != b.chat {
+		return false
+	}
+	return true
+}
+
+// evChat extracts the chat/peer JID an event concerns.
+func evChat(ev events.Event) string {
+	switch d := ev.Data.(type) {
+	case binary.Node:
+		if c, ok := d.StringAttr("from"); ok {
+			return c
+		}
+		if c, ok := d.StringAttr("to"); ok {
+			return c
+		}
+	case api.Message:
+		return d.Chat.JID
+	}
+	return ""
 }
 
 func (b *wsEventBridge) closeOnce() {

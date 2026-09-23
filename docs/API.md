@@ -103,7 +103,7 @@ intermediaries and the peer alive (send `ping` to get `pong` at your end).
 | `ping` | — | liveness ping; server replies `pong` |
 | `send` | `session`, `to`, `text` | enqueue a text send; result carries the message id |
 | `sync` | `session` | trigger contacts/chats sync; result when done |
-| `subscribe` | `session` | only forward that session's events (`""` = all) |
+| `subscribe` | `session`, `jid` | only forward that session's events; `jid` narrows to messages to/from one chat (`""` = all chats) |
 
 Streaming example (Python):
 

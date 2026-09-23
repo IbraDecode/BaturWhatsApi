@@ -15,12 +15,14 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/ibradecode/baturwhatsapi/api"
 	"github.com/ibradecode/baturwhatsapi/events"
 	"github.com/ibradecode/baturwhatsapi/internal/version"
 	"github.com/ibradecode/baturwhatsapi/protocol/binary"
+	"github.com/ibradecode/baturwhatsapi/transport/ws"
 )
 
 // ErrNoToken means public binding was requested without an API token.
@@ -35,6 +37,9 @@ type Server struct {
 
 	srv     *http.Server
 	testURL string // set by tests when routed through httptest
+
+	connMu sync.Mutex
+	conns  map[*ws.Conn]struct{} // hijacked WS conns, force-closed on shutdown
 }
 
 // New validates config and wires the handler.
@@ -68,7 +73,36 @@ func New(s *Server) (*Server, error) {
 		ReadTimeout:  15 * time.Second,
 		WriteTimeout: 0, // SSE: managed per-stream
 	}
+	s.conns = make(map[*ws.Conn]struct{})
 	return s, nil
+}
+
+func (s *Server) trackConn(c *ws.Conn) {
+	s.connMu.Lock()
+	s.conns[c] = struct{}{}
+	s.connMu.Unlock()
+}
+
+func (s *Server) untrackConn(c *ws.Conn) {
+	s.connMu.Lock()
+	delete(s.conns, c)
+	s.connMu.Unlock()
+}
+
+// closeConnections force-closes any hijacked WS connections. http.Server
+// opts out of managing hijacked conns, so without this graceful shutdown
+// would strand bridge goroutines blocked on reads.
+func (s *Server) closeConnections() {
+	s.connMu.Lock()
+	cs := make([]*ws.Conn, 0, len(s.conns))
+	for c := range s.conns {
+		cs = append(cs, c)
+	}
+	s.conns = make(map[*ws.Conn]struct{})
+	s.connMu.Unlock()
+	for _, c := range cs {
+		_ = c.Close()
+	}
 }
 
 func (s *Server) auth(next http.Handler) http.Handler {
@@ -98,7 +132,9 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 	case <-ctx.Done():
 		sctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		return s.srv.Shutdown(sctx)
+		err := s.srv.Shutdown(sctx)
+		s.closeConnections()
+		return err
 	case err := <-errCh:
 		if errors.Is(err, http.ErrServerClosed) {
 			return nil

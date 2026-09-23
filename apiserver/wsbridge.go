@@ -60,6 +60,8 @@ func (s *Server) hSessionWS(w http.ResponseWriter, r *http.Request) {
 	defer wsConnections.Add(-1)
 
 	b := &wsEventBridge{conn: conn, batur: s.Batur, close: make(chan struct{})}
+	s.trackConn(conn)
+	defer s.untrackConn(conn)
 	hello := wsEnvelope{Type: "hello", Data: map[string]any{"engine": "baturwhatsapi", "version": version.Version}}
 	if err := b.send(hello); err != nil {
 		_ = conn.Close()

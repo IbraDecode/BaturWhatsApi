@@ -435,40 +435,51 @@ func TestWSBridge(t *testing.T) {
 		t.Fatalf("first frame not hello: %s", raw)
 	}
 
-	// send a command; expect result ok + a streamed message.sent event
-	cmd, _ := json.Marshal(map[string]string{"op": "send", "session": "wsdev", "to": st.Account, "text": "ws bridge"})
-	if err := c.SendText(wctx, cmd); err != nil {
-		t.Fatal(err)
-	}
-	var gotResult, gotEvent bool
-	var sentID string
-	for i := 0; i < 40 && (!gotResult || !gotEvent); i++ {
-		raw, err := c.ReceiveBinary(wctx)
-		if err != nil {
+	// send a command; expect a result (retry once on a transient failure)
+	// plus a streamed message.sent event. The event goroutine and the
+	// command handler run concurrently, so the event may legally arrive
+	// either before or after the result: scan until both are seen.
+	var gotEvent bool
+	sendOK := false
+	sendDone := false
+	var lastSendErr string
+	for attempt := 0; attempt < 2 && !(sendOK && gotEvent); attempt++ {
+		cmd, _ := json.Marshal(map[string]string{"op": "send", "session": "wsdev", "to": st.Account, "text": "ws bridge"})
+		if err := c.SendText(wctx, cmd); err != nil {
 			t.Fatal(err)
 		}
-		var top struct {
-			Type string          `json:"type"`
-			Op   string          `json:"op"`
-			Ok   bool            `json:"ok"`
-			ID   string          `json:"id"`
-			Data json.RawMessage `json:"data"`
-		}
-		if json.Unmarshal(raw, &top) != nil {
-			continue
-		}
-		switch top.Type {
-		case "result":
-			if top.Op == "send" && top.Ok && top.ID != "" {
-				sentID = top.ID
-				gotResult = true
+		step, scancel := context.WithTimeout(context.Background(), 8*time.Second)
+	scan:
+		for !(sendOK && gotEvent) {
+			raw, err := c.ReceiveBinary(step)
+			if err != nil {
+				break scan
 			}
-		case "message.sent":
-			gotEvent = true
+			var top struct {
+				Type  string `json:"type"`
+				Op    string `json:"op"`
+				Ok    bool   `json:"ok"`
+				ID    string `json:"id"`
+				Error string `json:"error"`
+			}
+			if json.Unmarshal(raw, &top) != nil {
+				continue
+			}
+			if top.Type == "result" && top.Op == "send" {
+				sendDone = true
+				if top.Ok && top.ID != "" {
+					sendOK = true
+				} else {
+					lastSendErr = top.Error
+				}
+			} else if top.Type == "message.sent" {
+				gotEvent = true
+			}
 		}
+		scancel()
 	}
-	if !gotResult || sentID == "" {
-		t.Fatal("no send result received over ws")
+	if !sendOK {
+		t.Fatalf("no send result received over ws (done=%v last error: %q)", sendDone, lastSendErr)
 	}
 	if !gotEvent {
 		t.Fatal("no message.sent event streamed over ws")

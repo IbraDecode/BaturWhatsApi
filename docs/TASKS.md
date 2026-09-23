@@ -30,7 +30,7 @@ Status: TODO / IN_PROGRESS / BLOCKED / DONE.
 |---|------|--------|
 | T-201 | Media engine: download/upload pipeline (encrypt/decrypt, refs) | TODO |
 | T-202 | REST + WebSocket API servers over core (core stays REST-free) | IN_PROGRESS | v1 REST+SSE+WS bridge live (apiserver/); device pairing/registration endpoints pending |
-| T-203 | SDKs: Python + TypeScript thin clients over API | TODO |
+| T-203 | SDKs: Python + TypeScript thin clients over API | DONE | Python (REST+SSE+WS RFC6455 stdlib), Node (fetch+global WebSocket), TypeScript (types, runs on Node22 type-stripping); all verified live vs serve --mock |
 | T-204 | Postgres/SQLite storage adapters (multi-node) | TODO |
 | T-205 | Metrics endpoint (Prometheus) + structured health | DONE | /metrics text/0.0.4 (T-205, 2026-09-23) |
 | T-206 | Group/newsletter domain models + operations | TODO |

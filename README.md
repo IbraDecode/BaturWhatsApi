@@ -130,6 +130,7 @@ go     run ./examples/sdk/go
 - `docs/PROJECT_STATE.md` — living state & readiness gate
 - `docs/API.md` — HTTP + WebSocket reference (auth, REST, events, ws bridge)
 - `docs/BENCH.md` — reproducible `batur bench` numbers & caveats
+- `docs/TROUBLESHOOTING.md` — operator field guide for common pitfalls
 - `docs/decisions/ADR-0007-storage-adapters-sibling-module.md` — T-204 design
 - `docs/architecture/ARCHITECTURE.md` — layering & data paths
 - `docs/decisions/` — ADRs (language, deps, concurrency, storage, auth)

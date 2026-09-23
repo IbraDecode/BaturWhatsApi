@@ -19,7 +19,7 @@ Status: TODO / IN_PROGRESS / BLOCKED / DONE.
 | T-101 | Signal e2e crypto engine: identity keys, prekeys, X3DH/Double Ratchet (own implementation; stdlib crypto) | DONE | security/e2e: verified bundles, out-of-order skipping, replay/tamper guards, persisted ratchets |
 | T-102 | `api.SendText` / media-free message send over real flow | IN_PROGRESS | engine-to-engine flow live (api.SendText + mock relay); WhatsApp wire mapping + receipts pending |
 | T-103 | Registration & QR/pairing-code flow (companion platform) | TODO |
-| T-104 | Sync engine: contacts, chats, history, appstate + checkpoints | TODO |
+| T-104 | Sync engine: contacts, chats, history, appstate + checkpoints | IN_PROGRESS | framework live (sync/, resumable, protocol-tested); WA payload decoders pending |
 | T-105 | Receipt/ack state model in domain events | TODO |
 | T-106 | Keep-alive policy tuning: exponential idle ping, server config-driven | TODO |
 

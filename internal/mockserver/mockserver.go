@@ -111,6 +111,35 @@ func (s *Server) DeviceCount() int {
 	return len(s.devices)
 }
 
+// syncPage serves deterministic paged data for the sync engine tests:
+// 10 items per stage, cursor = index; stage "contacts"/"chats".
+func (s *Server) syncPage(iqID, stage, cursor string) binary.Node {
+	const pageSize = 3
+	start := 0
+	if cursor != "" {
+		fmt.Sscanf(cursor, "%d", &start)
+	}
+	total := 10
+	if stage == "chats" {
+		total = 7
+	}
+	var items []binary.Node
+	next := start
+	for i := 0; i < pageSize && next < total; i++ {
+		items = append(items, binary.Node{Tag: "item",
+			Attrs: binary.Attrs{"id": fmt.Sprintf("%s-%d", stage, next)}})
+		next++
+	}
+	attrs := binary.Attrs{"id": iqID, "type": "result"}
+	content := []binary.Node{{Tag: "sync", Attrs: binary.Attrs{"stage": stage}, Content: items}}
+	if next < total {
+		content[0].Attrs["cursor"] = fmt.Sprintf("%d", next)
+	} else {
+		content[0].Attrs["cursor"] = ""
+	}
+	return binary.Node{Tag: "iq", Attrs: attrs, Content: content}
+}
+
 func (s *Server) registerDevice(ds *deviceSession) {
 	s.mu.Lock()
 	s.devices[ds.reg.AccountJID] = ds
@@ -382,6 +411,9 @@ func (s *Server) handle(ctx context.Context, ds *deviceSession, n binary.Node) b
 				Tag: "iq", Attrs: binary.Attrs{"id": id, "type": "result"},
 				Content: echo,
 			})
+		case typ == "get" && n.MustStringAttr("xmlns") == "batur.sync":
+			s.push(ctx, ds, s.syncPage(id, n.MustStringAttr("stage"),
+				n.MustStringAttr("cursor")))
 		default: // connect config iq and everything else -> result
 			resp := binary.Node{
 				Tag: "iq",

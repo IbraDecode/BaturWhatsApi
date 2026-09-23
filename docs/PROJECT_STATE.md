@@ -29,7 +29,7 @@ itself 24/7 (supervisor + automatic recovery).
 | Events               | ✅     | ordered bus, block/drop policies, panic isolation, wildcard routing |
 | Public API           | ✅     | façade + domain models + subscriptions + **SendText wired end-to-end** (engine-to-engine via mock relay) |
 | E2E crypto (Signal)  | 🟡     | X3DH + Double Ratchet + state persistence DONE (security/e2e, race-clean); WhatsApp SignalMessage wire mapping = T-102 |
-| Sync engine          | ❌     | Phase 2 (contacts/chats/history/appstate + checkpoints) |
+| Sync engine          | 🟡     | resumable framework DONE (sync pkg: stages, persisted cursors, events, protocol integration test); WA payload decoders pending |
 | Media engine         | ❌     | Phase 3 |
 | Observability        | 🟡     | bus stats, health snapshots, structured logs; metrics endpoints not wired |
 | REST/WS API server   | 🟡     | apiserver (v1): /health /sessions /iq bridge /SSE events, bearer auth fail-closed, `batur serve`; WSS + pairing endpoints pending |

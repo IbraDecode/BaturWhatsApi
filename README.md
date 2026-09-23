@@ -26,11 +26,13 @@ recovery), state machine, observability.
 
 ## Status (v0.1.0)
 
-Core runtime is alive end-to-end: dial → noise handshake → binary
-protocol → encrypted node exchange → events → multi-session supervision
-with automatic reconnect, sessions survive restarts. See
-`docs/PROJECT_STATE.md` for the honest readiness matrix — Signal e2e
-messaging is the next milestone.
+Core runtime is alive end-to-end: dial → noise handshake (verified
+cert-chain) → binary protocol → encrypted node exchange → events →
+multi-session supervision with automatic recovery, sessions survive
+restarts. Engine-to-engine **end-to-end encrypted messaging** (X3DH +
+Double Ratchet, stdlib-only) and a **resumable sync framework** are in.
+See `docs/PROJECT_STATE.md` for the honest readiness matrix; the next
+milestone is WhatsApp wire-compatibility mapping (docs/TASKS.md T-102).
 
 ## Quickstart
 

@@ -291,8 +291,18 @@ func (xx *XX) ServerHello1(ephPub, payload []byte) (serverEph []byte, staticCT [
 }
 
 // ClientFinish: initiator processes the server output and produces its own
-// static ciphertext + payload ciphertext.
+// static ciphertext + payload ciphertext in one step.
 func (xx *XX) ClientFinish(serverEph, staticCT, payloadCT []byte, payload []byte) (clientStaticCT, clientPayloadCT []byte, err error) {
+	if _, _, err = xx.ReadServerHello(serverEph, staticCT, payloadCT); err != nil {
+		return nil, nil, err
+	}
+	return xx.WriteClientFinish(payload)
+}
+
+// ReadServerHello consumes the server's message parts, returning the remote
+// static key. After this call the caller MAY verify server identity
+// (ServerAuth / cert check) before writing its own finish.
+func (xx *XX) ReadServerHello(serverEph, staticCT, payloadCT []byte) (remoteStatic, serverPayload []byte, err error) {
 	if !xx.initiator {
 		return nil, nil, ErrHandshakeState
 	}
@@ -301,7 +311,7 @@ func (xx *XX) ClientFinish(serverEph, staticCT, payloadCT []byte, payload []byte
 	if err = xx.mix(xx.eph.Priv, serverEph); err != nil {
 		return nil, nil, err
 	}
-	remoteStatic, err := xx.nh.decrypt(staticCT)
+	remoteStatic, err = xx.nh.decrypt(staticCT)
 	if err != nil {
 		return nil, nil, fmt.Errorf("noise: server static: %w", err)
 	}
@@ -309,12 +319,21 @@ func (xx *XX) ClientFinish(serverEph, staticCT, payloadCT []byte, payload []byte
 	if err = xx.mix(xx.eph.Priv, remoteStatic); err != nil {
 		return nil, nil, err
 	}
-	if _, err = xx.nh.decrypt(payloadCT); err != nil {
+	serverPayload, err = xx.nh.decrypt(payloadCT)
+	if err != nil {
 		return nil, nil, fmt.Errorf("noise: server payload: %w", err)
 	}
-	// -> s (encrypted under current key), then se
+	return remoteStatic, serverPayload, nil
+}
+
+// WriteClientFinish encrypts own static + payload and completes the
+// handshake state.
+func (xx *XX) WriteClientFinish(payload []byte) (clientStaticCT, clientPayloadCT []byte, err error) {
+	if !xx.initiator {
+		return nil, nil, ErrHandshakeState
+	}
 	clientStaticCT = xx.nh.encrypt(xx.static.Public())
-	if err = xx.mix(xx.static.Priv, serverEph); err != nil {
+	if err = xx.mix(xx.static.Priv, xx.remoteEph); err != nil {
 		return nil, nil, err
 	}
 	clientPayloadCT = xx.nh.encrypt(payload)

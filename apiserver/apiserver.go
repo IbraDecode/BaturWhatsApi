@@ -57,6 +57,9 @@ func New(s *Server) (*Server, error) {
 	mux.HandleFunc("POST /v1/sessions/{id}/text", s.hSessionText)
 	mux.HandleFunc("GET /v1/events", s.hEvents)
 	mux.HandleFunc("GET /metrics", s.hMetrics)
+	mux.HandleFunc("POST /v1/sessions/{id}/sync", s.hSessionSync)
+	mux.HandleFunc("GET /v1/sessions/{id}/contacts", s.hSessionContacts)
+	mux.HandleFunc("GET /v1/sessions/{id}/chats", s.hSessionChats)
 	s.srv = &http.Server{
 		Addr:         s.Bind,
 		Handler:      s.auth(mux),
@@ -238,6 +241,37 @@ func (s *Server) hSessionText(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusAccepted, map[string]bool{"ok": true})
+}
+
+// hSessionSync triggers a resumable sync run for one session.
+func (s *Server) hSessionSync(w http.ResponseWriter, r *http.Request) {
+	if err := s.Batur.RunSync(r.Context(), r.PathValue("id")); err != nil {
+		code := http.StatusInternalServerError
+		if strings.Contains(err.Error(), "unknown session") {
+			code = http.StatusNotFound
+		}
+		writeErr(w, code, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+func (s *Server) hSessionContacts(w http.ResponseWriter, r *http.Request) {
+	list, err := s.Batur.Contacts(r.Context(), r.PathValue("id"))
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"contacts": list})
+}
+
+func (s *Server) hSessionChats(w http.ResponseWriter, r *http.Request) {
+	list, err := s.Batur.Chats(r.Context(), r.PathValue("id"))
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"chats": list})
 }
 
 // hEvents streams engine events as Server-Sent Events.

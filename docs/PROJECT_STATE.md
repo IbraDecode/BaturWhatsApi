@@ -29,10 +29,10 @@ itself 24/7 (supervisor + automatic recovery).
 | Events               | ✅     | ordered bus, block/drop policies, panic isolation, wildcard routing |
 | Public API           | ✅     | façade + domain models + subscriptions + **SendText wired end-to-end** (engine-to-engine via mock relay) |
 | E2E crypto (Signal)  | 🟡     | X3DH + Double Ratchet + state persistence DONE (security/e2e, race-clean); WhatsApp SignalMessage wire mapping = T-102 |
-| Sync engine          | 🟡     | resumable framework DONE (sync pkg: stages, persisted cursors, events, protocol integration test); WA payload decoders pending |
+| Sync engine          | ✅     | resumable stages + snapshot store + auto-sync-on-ready + periodic refresh + REST (/sync,/contacts,/chats) + Prometheus; protocol-verified |
 | Media engine         | ❌     | Phase 3 |
-| Observability        | 🟡     | bus stats, health snapshots, structured logs; metrics endpoints not wired |
-| REST/WS API server   | 🟡     | apiserver (v1): /health /sessions /iq bridge /SSE events, bearer auth fail-closed, `batur serve`; WSS + pairing endpoints pending |
+| Observability        | ✅     | /metrics Prometheus (session state one-hot, retries, online, heap/goroutine/gc, bus counters), structured logs, health API |
+| REST/WS API server   | 🟡     | apiserver v1: health/sessions/iq/text/sync/contacts/chats + SSE + /metrics + sealed storage; WSS event stream + pairing endpoints pending |
 | Testing              | ✅     | 12/12 packages green incl. stress + chaos tests; `-race` full suite CLEAN |
 | Benchmarks           | ✅     | `internal/bench`: 100 idle sessions = 119.8 KiB heap/session, ~5 goroutines/session, 52.7K encrypted IQ round-trips/s single session (19µs/op); node codec 2.2µs enc / 3.2µs dec; race + stress green |
 | CI/CD                | ✅     | GitHub Actions: build, vet, fuzz-smoke tests, race, cross-compile |

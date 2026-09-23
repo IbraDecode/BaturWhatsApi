@@ -20,7 +20,7 @@ Status: TODO / IN_PROGRESS / BLOCKED / DONE.
 | T-101 | Signal e2e crypto engine: identity keys, prekeys, X3DH/Double Ratchet (own implementation; stdlib crypto) | DONE | security/e2e: verified bundles, out-of-order skipping, replay/tamper guards, persisted ratchets |
 | T-102 | WhatsApp wire-compatible SignalMessage + live receipts | BLOCKED | needs live WhatsApp account/network to verify byte-for-byte Signal interop (human action + real device). Engine-to-engine e2e already live via mock relay. |
 | T-103 | Registration & QR/pairing-code flow (companion platform) | TODO |
-| T-104 | Sync engine: contacts, chats, history, appstate + checkpoints | IN_PROGRESS | framework live (sync/, resumable, protocol-tested); WA payload decoders pending |
+| T-104 | Sync engine: contacts, chats, history, appstate + checkpoints | IN_PROGRESS | contacts+chats DONE (runtime, auto-sync, REST, snapshots); history+appstate pending |
 | T-105 | Receipt/ack state model in domain events | TODO |
 | T-106 | Keep-alive policy tuning: exponential idle ping, server config-driven | TODO |
 
@@ -32,7 +32,7 @@ Status: TODO / IN_PROGRESS / BLOCKED / DONE.
 | T-202 | REST + WebSocket API servers over core (core stays REST-free) | IN_PROGRESS | v1 REST+SSE live (apiserver/); WS bridge + pairing endpoints TODO |
 | T-203 | SDKs: Python + TypeScript thin clients over API | TODO |
 | T-204 | Postgres/SQLite storage adapters (multi-node) | TODO |
-| T-205 | Metrics endpoint (Prometheus) + structured health | TODO |
+| T-205 | Metrics endpoint (Prometheus) + structured health | DONE | /metrics text/0.0.4 (T-205, 2026-09-23) |
 | T-206 | Group/newsletter domain models + operations | TODO |
 | T-207 | Dockerfile + systemd/24/7 deployment kit | TODO |
 | T-208 | Protocol fuzz corpus + regression fixtures from real captures | TODO |

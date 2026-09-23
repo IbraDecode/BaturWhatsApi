@@ -264,3 +264,44 @@ func readAll(t *testing.T, r io.Reader) string {
 	b, _ := io.ReadAll(r)
 	return string(b)
 }
+
+func TestSyncEndpoints(t *testing.T) {
+	s, _, cleanup := newTestServer(t, "")
+	defer cleanup()
+	waitOnlineSimple(t, s)
+	// trigger sync
+	resp, err := http.Post(s.testURL+"/v1/sessions/http-dev/sync", "application/json", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != 200 {
+		t.Fatalf("sync status = %d", resp.StatusCode)
+	}
+	// read contacts
+	rc, err := http.Get(s.testURL + "/v1/sessions/http-dev/contacts")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rc.Body.Close()
+	body, _ := io.ReadAll(rc.Body)
+	if !strings.Contains(string(body), "Contact 0") || !strings.Contains(string(body), "62812") {
+		t.Fatalf("contacts body = %s", body)
+	}
+	// read chats
+	rh, err := http.Get(s.testURL + "/v1/sessions/http-dev/chats")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rh.Body.Close()
+	hbody, _ := io.ReadAll(rh.Body)
+	if !strings.Contains(string(hbody), "\"chats\"") {
+		t.Fatalf("chats body = %s", hbody)
+	}
+	// sync unknown session -> 404
+	ru, _ := http.Post(s.testURL+"/v1/sessions/nope/sync", "application/json", nil)
+	ru.Body.Close()
+	if ru.StatusCode != 404 {
+		t.Fatalf("unknown sync status = %d", ru.StatusCode)
+	}
+}

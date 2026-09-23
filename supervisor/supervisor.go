@@ -394,6 +394,11 @@ type Status struct {
 	Creds      session.Credentials
 }
 
+// LoggerDebug is a tiny logging escape hatch for embedding layers.
+func (sv *Supervisor) LoggerDebug(msg string, kv ...any) {
+	sv.opts.Logger.Debug(msg, kv...)
+}
+
 // Sessions lists registered ids.
 func (sv *Supervisor) Sessions() []string {
 	sv.mu.Lock()

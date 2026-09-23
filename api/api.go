@@ -80,6 +80,9 @@ type Options struct {
 	Dict *token.Dictionary
 	// MasterKey (32 bytes) seals all stored values at rest (AES-256-GCM).
 	MasterKey []byte
+	// Sync opts into automatic contacts/chats snapshotting on session
+	// ready (and optionally periodic re-sync).
+	Sync SyncOptions
 	// Recovery tuning.
 	BaseBackoff time.Duration
 	MaxBackoff  time.Duration
@@ -95,6 +98,7 @@ type Batur struct {
 	dict    *token.Dictionary
 	sess    map[string]*session.Session
 	bundles BundleSource
+	syncSub *events.Subscription
 }
 
 // New creates an engine instance.
@@ -177,10 +181,51 @@ func (b *Batur) RequestNode(ctx context.Context, id string, n binary.Node) (bina
 }
 
 // Start begins supervising all attached sessions.
-func (b *Batur) Start(ctx context.Context) error { return b.sup.Start(ctx) }
+func (b *Batur) Start(ctx context.Context) error {
+	if b.opts.Sync.Enabled {
+		b.startAutoSync(ctx)
+	}
+	return b.sup.Start(ctx)
+}
+
+// startAutoSync schedules a contacts/chats snapshot whenever a session
+// reaches ready, plus an optional periodic refresh.
+func (b *Batur) startAutoSync(ctx context.Context) {
+	b.syncSub, _ = b.bus.Subscribe(events.SessionReady, 32, events.PolicyBlock,
+		func(_ context.Context, ev events.Event) {
+			sctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+			defer cancel()
+			if err := b.RunSync(sctx, ev.Session); err != nil {
+				b.sup.LoggerDebug("auto-sync failed", "session", ev.Session, "err", err)
+			}
+		})
+	if b.opts.Sync.Interval > 0 {
+		go func() {
+			t := time.NewTicker(b.opts.Sync.Interval)
+			defer t.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-t.C:
+					for _, id := range b.Sessions() {
+						if st, err := b.Status(id); err == nil && st.State == StateOnline {
+							sctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+							_ = b.RunSync(sctx, id)
+							cancel()
+						}
+					}
+				}
+			}
+		}()
+	}
+}
 
 // Stop shuts down the fleet and (if owned) the event bus.
 func (b *Batur) Stop(ctx context.Context) error {
+	if b.syncSub != nil {
+		b.syncSub.Unsubscribe()
+	}
 	err := b.sup.Stop(ctx)
 	if b.owns {
 		b.bus.Close()

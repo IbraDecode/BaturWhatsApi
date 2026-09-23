@@ -112,7 +112,7 @@ func (s *Server) DeviceCount() int {
 }
 
 // syncPage serves deterministic paged data for the sync engine tests:
-// 10 items per stage, cursor = index; stage "contacts"/"chats".
+// contacts (jid+name) and chats (jid+unread). cursor = start index.
 func (s *Server) syncPage(iqID, stage, cursor string) binary.Node {
 	const pageSize = 3
 	start := 0
@@ -126,8 +126,17 @@ func (s *Server) syncPage(iqID, stage, cursor string) binary.Node {
 	var items []binary.Node
 	next := start
 	for i := 0; i < pageSize && next < total; i++ {
-		items = append(items, binary.Node{Tag: "item",
-			Attrs: binary.Attrs{"id": fmt.Sprintf("%s-%d", stage, next)}})
+		if stage == "contacts" {
+			items = append(items, binary.Node{Tag: "contact", Attrs: binary.Attrs{
+				"jid":  fmt.Sprintf("628120000%03d@s.whatsapp.net", next),
+				"name": fmt.Sprintf("Contact %d", next),
+			}})
+		} else {
+			items = append(items, binary.Node{Tag: "chat", Attrs: binary.Attrs{
+				"jid":    fmt.Sprintf("628120000%03d@s.whatsapp.net", next),
+				"unread": fmt.Sprintf("%d", next%4),
+			}})
+		}
 		next++
 	}
 	attrs := binary.Attrs{"id": iqID, "type": "result"}

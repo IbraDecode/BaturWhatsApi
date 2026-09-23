@@ -1,0 +1,61 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop, BATURWHATSAPI]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.x'
+      - name: fmt
+        run: test -z "$(gofmt -l . | grep -v '^$')"
+      - name: vet
+        run: go vet ./...
+      - name: test
+        run: go test ./... -count=1 -timeout 10m
+      - name: race
+        run: go test ./... -count=1 -race -timeout 20m
+
+  cross-build:
+    needs: test
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+          - goos: linux
+            goarch: arm64
+          - goos: darwin
+            goarch: arm64
+    env:
+      CGO_ENABLED: "0"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.x'
+      - name: build
+        run: |
+          GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} \
+          go build -trimpath -o batur-${{ matrix.goos }}-${{ matrix.goarch }} ./cmd/batur
+
+  bench:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.x'
+      - name: micro-bench
+        run: go run ./cmd/batur bench

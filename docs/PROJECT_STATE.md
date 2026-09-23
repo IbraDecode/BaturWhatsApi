@@ -1,0 +1,81 @@
+# PROJECT STATE — BaturWhatsApi
+
+Updated: 2026-09-23 · Engine: v0.1.0 (development channel) · Branch: `main`
+
+## Snapshot
+
+BaturWhatsApi is an **independent WhatsApp-Web communication engine**
+(library + platform), not a wrapper of any existing implementation.
+Reference projects (Baileys, whatsmeow, GOWA, wa-go, wa-spec) were used
+**only as protocol research**.
+
+Core principle: a persistent, resilient, modular, multi-session,
+low-memory, observable, production-grade engine — and a runtime that is
+itself 24/7 (supervisor + automatic recovery).
+
+## Production-readiness gate
+
+| Area                 | Status | Evidence |
+|----------------------|--------|----------|
+| Architecture         | ✅     | `docs/architecture/ARCHITECTURE.md`, 5 ADRs |
+| Protocol layer       | ✅     | WAWebMulti binary node codec + dictionaries + zlib + pb wire subset; fuzz round-trip (500 cases) |
+| Security layer       | ✅     | Noise_XX_25519_AESGCM_SHA256 (WhatsApp variant), AES-256-GCM ctr ciphers, HKDF RFC 5869 vectors, fail-closed auth policy |
+| Transport            | ✅     | RFC 6455 WS client (masked, fragmented, ping/pong, size limits) + in-memory pipe |
+| Session engine       | ✅     | full lifecycle, request/response matching, keepalive, stale detection, single-reader concurrency contract |
+| State machine        | ✅     | 10 explicit states, legal-transition enforcement, watchers, forced-recovery path |
+| Multi-session        | ✅     | isolated per-session state; 3-session stress test with unique noise keys |
+| Persistence          | ✅     | KV abstraction; memory + file stores; resume-across-restart integration test |
+| Supervisor (24/7)    | ✅     | backoff + jitter, stability reset, stuck watchdog, chaos-reconnect test |
+| Events               | ✅     | ordered bus, block/drop policies, panic isolation, wildcard routing |
+| Public API           | 🟡     | façade + domain Message model + subscriptions; **SendText blocked on Signal engine** (returns ErrNotImplemented) |
+| E2E crypto (Signal)  | ❌     | Phase 2 (identity, prekeys, session establishment, message encryption) |
+| Sync engine          | ❌     | Phase 2 (contacts/chats/history/appstate + checkpoints) |
+| Media engine         | ❌     | Phase 3 |
+| Observability        | 🟡     | bus stats, health snapshots, structured logs; metrics endpoints not wired |
+| REST/WS API server   | ❌     | planned (public HTTP/WebSocket wrapper over core; core must stay REST-free) |
+| Testing              | ✅     | 11/11 packages green incl. stress + chaos tests |
+| Benchmarks           | 🟡     | codec/keygen micro-bench via `batur bench`; session-scale load test pending |
+| CI/CD                | ✅     | GitHub Actions: build, vet, fuzz-smoke tests, race, cross-compile |
+| Deployment           | 🟡     | single-binary model; Dockerfile pending |
+| Security audit       | 🟡     | in progress (see KNOWN_ISSUES) |
+
+## Key runtime facts (this machine, constrained container)
+
+- Go 1.27.1 (installed to `~/.local/go`), GOFLAGS: none, CGO off.
+- Memory 2GB — engine idle RSS target < 20MB/session remains plausible
+  (no measurements yet; benchmark task queued).
+- Full test suite runs in ~2s without race instrumentation; race suite
+  needs a longer timeout on this CPU.
+
+## Repository layout (current)
+
+```
+api/          public façade (Batur, Status, subscriptions, Message model)
+cmd/batur/    CLI (version | doctor | bench | demo)
+events/       event bus
+internal/     mockserver (protocol-level test/demo server), wapb, version
+protocol/     binary (WAWebMulti codec), pb (protobuf wire), token (dicts)
+security/     hkdf (RFC 5869), noise (XX handshake + transport ciphers)
+session/      connection engine per device
+statemachine/ connection lifecycle FSM
+storage/      KV interface + memory + file
+supervisor/   fleet supervision + recovery loops
+transport/    Conn/Dialer contracts, pipe, ws (RFC 6455)
+docs/         architecture, ADRs, research, ops notes (this folder)
+```
+
+## How to run
+
+```
+make test          # all packages
+make race          # race detector (slower)
+make bench         # micro-benchmarks
+go run ./cmd/batur demo     # full in-process end-to-end (mock server)
+go run ./cmd/batur doctor   # engine self-check
+```
+
+## Session memory for AI contributors
+
+This file + `TASKS.md` + `KNOWN_ISSUES.md` are the durable project
+brain. On every significant change, update all three. If a task is done
+but untested, it is NOT done.

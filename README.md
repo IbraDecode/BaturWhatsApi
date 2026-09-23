@@ -103,6 +103,7 @@ Zero-dependency SDK examples that speak the REST + WS API live in
 ## Documentation
 
 - `docs/PROJECT_STATE.md` — living state & readiness gate
+- `docs/API.md` — HTTP + WebSocket reference (auth, REST, events, ws bridge)
 - `docs/architecture/ARCHITECTURE.md` — layering & data paths
 - `docs/decisions/` — ADRs (language, deps, concurrency, storage, auth)
 - `docs/RESEARCH.md` — protocol research log (no copied code)

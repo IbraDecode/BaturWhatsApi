@@ -52,6 +52,26 @@ async function events(seconds) {
   if (stop) clearTimeout(stop);
 }
 
+// ws: live frames over the /v1/ws WebSocket bridge (Node 22+ global
+// WebSocket; otherwise falls back to SSE).
+async function wsStream(seconds) {
+  const wsURL = URL_.replace(/^http/, 'ws') + '/v1/ws';
+  if (typeof WebSocket === 'undefined') {
+    console.error('# globalThis.WebSocket not available; using SSE fallback');
+    return events(seconds);
+  }
+  return new Promise((resolve, reject) => {
+    const ws = new WebSocket(wsURL, {
+      headers: TOKEN ? { Authorization: 'Bearer ' + TOKEN } : {},
+    });
+    const show = (label, raw) => console.log(`[${label}]`, raw);
+    ws.onopen = () => show('hello', 'connected to ' + wsURL);
+    ws.onmessage = (e) => show('event', typeof e.data === 'string' ? e.data : String(e.data));
+    ws.onerror = (e) => { console.error('ws error', e.message || e); reject(e); };
+    if (seconds) setTimeout(() => { try { ws.close(); } catch {} resolve(); }, seconds * 1000);
+  });
+}
+
 switch (cmd) {
   case 'health':  console.log(JSON.stringify(await api('GET', '/v1/health'), null, 2)); break;
   case 'sessions':console.table(await api('GET', '/v1/sessions').then(r => r.sessions)); break;
@@ -62,7 +82,8 @@ switch (cmd) {
     break;
   }
   case 'events':  await events(parseInt(args[0] || '0', 10) || null); break;
+  case 'ws':      await wsStream(parseInt(args[0] || '0', 10) || null); break;
   default:
-    console.error('usage: node batur_client.mjs [--url U] [--token T] health|sessions|get <id>|text <sid> <to> <msg>|events [seconds]');
+    console.error('usage: node batur_client.mjs [--url U] [--token T] health|sessions|get <id>|text <sid> <to> <msg>|events|ws [seconds]');
     process.exit(2);
 }

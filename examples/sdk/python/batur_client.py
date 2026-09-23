@@ -8,6 +8,7 @@ Usage:
     python3 batur_client.py --url http://127.0.0.1:8080 sessions
     python3 batur_client.py --url http://127.0.0.1:8080 get mock-1
     python3 batur_client.py --url http://127.0.0.1:8080 text <session> <to_jid> <message>
+    python3 batur_client.py --url http://127.0.0.1:8080 ws --seconds 5 --subscribe <session>
 """
 import argparse
 import json
@@ -83,6 +84,9 @@ def main():
     g = sub.add_parser("get"); g.add_argument("session")
     t = sub.add_parser("text"); t.add_argument("session"); t.add_argument("to"); t.add_argument("message")
     e = sub.add_parser("events"); e.add_argument("--seconds", type=int, default=None)
+    w = sub.add_parser("ws")
+    w.add_argument("--seconds", type=int, default=None)
+    w.add_argument("--subscribe", default=None, help="filter to a session id")
     args = ap.parse_args()
     c = BaturClient(args.url, args.token)
 
@@ -101,6 +105,15 @@ def main():
             print("[%s] %s" % (ev["event"], json.dumps(ev["data"])[:160]))
         try:
             c.events(show, seconds=args.seconds)
+        except KeyboardInterrupt:
+            sys.exit(0)
+    elif args.cmd == "ws":
+        from batur_ws import stream
+
+        def show(frame):
+            print("[%s] %s" % (frame["type"], frame["data"][:200]))
+        try:
+            stream(c.url, c.token, show, seconds=args.seconds, session=args.subscribe)
         except KeyboardInterrupt:
             sys.exit(0)
 

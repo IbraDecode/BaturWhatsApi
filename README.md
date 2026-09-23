@@ -75,9 +75,20 @@ GET  /v1/sessions/{id}              one session
 DELETE /v1/sessions/{id}            detach
 POST /v1/sessions/{id}/iq           raw protocol bridge
 POST /v1/sessions/{id}/text         encrypted send (when a bundle source is wired)
+POST /v1/sessions/{id}/sync         resumable contacts/chats sync
+GET  /v1/sessions/{id}/contacts     synced contacts snapshot
+GET  /v1/sessions/{id}/chats        synced chats snapshot
+GET  /v1/sessions/{id}/history      bounded per-chat message history (?chat=&limit=)
 GET  /v1/events                     Server-Sent Events (all types)
+GET  /v1/ws                         WebSocket event bridge (JSON frames; send/sync/subscribe commands)
+GET  /metrics                       Prometheus text endpoint
 Authorization: Bearer $BATUR_API_TOKEN   (required for non-local bind)
 ```
+
+Zero-dependency SDK examples that speak the REST + WS API live in
+`examples/sdk/` (`python/batur_client.py`, `node/batur_client.mjs`,
+`go/main.go`); e.g. `python3 batur_client.py --url http://127.0.0.1:8080 ws
+--subscribe mock-1` streams live bridge frames.
 
 ## Production notes (current revision)
 

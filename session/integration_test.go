@@ -2,7 +2,8 @@ package session_test
 
 import (
 	"context"
-	"errors"
+	"crypto/ed25519"
+	"crypto/rand"
 	"strings"
 	"testing"
 	"time"
@@ -28,15 +29,7 @@ func testServer(t *testing.T) (*mockserver.Server, mockserver.Dialer) {
 
 func trustedAuth(t *testing.T, srv *mockserver.Server) session.ServerAuth {
 	t.Helper()
-	return func(staticPub, certBlob []byte) error {
-		if len(staticPub) != 32 {
-			return errors.New("bad static length")
-		}
-		if !strings.HasPrefix(string(certBlob), "mock-cert:") {
-			return errors.New("untrusted cert blob")
-		}
-		return nil
-	}
+	return session.TrustedRootAuth(srv.RootPub())
 }
 
 func newSession(t *testing.T, id string, dialer mockserver.Dialer, store storage.KV, bus *events.Bus, auth session.ServerAuth) *session.Session {
@@ -172,13 +165,16 @@ func TestSessionResumeAcrossRestart(t *testing.T) {
 func TestSessionRejectsUntrustedServer(t *testing.T) {
 	_, dialer := testServer(t)
 	ctx := context.Background()
-	badAuth := func(staticPub, certBlob []byte) error {
-		return errors.New("pin mismatch")
+	// Wrong trust root: certificate signatures must not validate.
+	wrongRoot, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
 	}
-	s := newSession(t, "dev-c", dialer, storage.NewMemory(), nil, badAuth)
-	err := s.Start(ctx)
-	if err == nil || !strings.Contains(err.Error(), "pin mismatch") {
-		t.Fatalf("expected auth failure, got %v", err)
+	s := newSession(t, "dev-c", dialer, storage.NewMemory(), nil,
+		session.TrustedRootAuth(wrongRoot))
+	err = s.Start(ctx)
+	if err == nil || !strings.Contains(err.Error(), "signature") {
+		t.Fatalf("expected cert signature failure, got %v", err)
 	}
 	if s.State() != statemachine.Error {
 		t.Fatalf("state after auth reject = %s", s.State())

@@ -9,6 +9,8 @@ package mockserver
 
 import (
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -20,6 +22,7 @@ import (
 	"github.com/ibradecode/baturwhatsapi/protocol/binary"
 	"github.com/ibradecode/baturwhatsapi/protocol/token"
 	"github.com/ibradecode/baturwhatsapi/security/noise"
+	"github.com/ibradecode/baturwhatsapi/security/wacert"
 	"github.com/ibradecode/baturwhatsapi/transport"
 )
 
@@ -28,9 +31,11 @@ type Server struct {
 	Dict   *token.Dictionary
 	Logger *slog.Logger
 
-	mu       sync.Mutex
-	registry map[string]*Registration // by device id
-	static   *noise.KeyPair
+	mu        sync.Mutex
+	registry  map[string]*Registration // by device id
+	static    *noise.KeyPair
+	rootPriv  ed25519.PrivateKey
+	certChain []byte // signed by root -> intermediate -> leaf(static)
 	// DropAfterRequests: after this many iq responses the server kills
 	// the client connection (failure injection for supervisor tests).
 	dropAfterRequests int
@@ -56,13 +61,33 @@ func New(dict *token.Dictionary) (*Server, error) {
 	if dict == nil {
 		dict = token.Default()
 	}
-	return &Server{
+	srv := &Server{
 		Dict:     dict,
 		Logger:   slog.Default().With("comp", "mockserver"),
 		registry: map[string]*Registration{},
 		static:   kp,
-	}, nil
+	}
+	rootPub, rootPriv, err := ed25519.GenerateKey(rand.Reader)
+	_ = rootPub
+	if err != nil {
+		return nil, err
+	}
+	interPub, interPriv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		return nil, err
+	}
+	now := time.Now()
+	leafDetails := wacert.BuildDetails(7, 3, kp.Public(), now.Add(-time.Hour), now.AddDate(1, 0, 0))
+	interDetails := wacert.BuildDetails(3, 0, interPub, now.Add(-time.Hour), now.AddDate(2, 0, 0))
+	leafSig := ed25519.Sign(interPriv, leafDetails)
+	interSig := ed25519.Sign(rootPriv, interDetails)
+	srv.certChain = wacert.BuildChain(leafDetails, leafSig, interDetails, interSig)
+	srv.rootPriv = rootPriv
+	return srv, nil
 }
+
+// RootPub returns the certificate trust root this mock server signed with.
+func (s *Server) RootPub() ed25519.PublicKey { return s.rootPriv.Public().(ed25519.PublicKey) }
 
 // SetDropAfterRequests makes the server sever the connection after every
 // N-th incoming node from a device (<=0 disables). For chaos/recovery
@@ -122,8 +147,7 @@ func (s *Server) ServeConn(ctx context.Context, conn transport.Conn) error {
 	if err != nil || len(ch.Ephemeral) != 32 {
 		return errors.New("mock: malformed client hello")
 	}
-	cert := []byte("mock-cert:" + time.Now().UTC().Format(time.RFC3339))
-	serverEph, staticCT, certCT, err := xx.ServerHello1(ch.Ephemeral, cert)
+	serverEph, staticCT, certCT, err := xx.ServerHello1(ch.Ephemeral, s.certChain)
 	if err != nil {
 		return err
 	}

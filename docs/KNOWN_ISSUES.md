@@ -9,13 +9,10 @@ Honest register. Anything production-relevant lives here until fixed.
    protocol nodes and stream events, but cannot yet encrypt/decrypt
    WhatsApp messages end-to-end. Until T-101/T-102 land, this is NOT a
    messaging product. Status: open.
-2. **Server authentication = first-contact pin, not WA cert chain.**
-   `session.ServerAuth` policy is pluggable and fail-closed
-   (`nil` = reject), but the real Ed25519 CertChain verifier is not
-   implemented (T-001). Trust-on-first-use carries a MITM window on the
-   first connection.
-3. **Race suite not yet green.** All tests pass without `-race`; the
-   race run needs CI time + any fixes surfaced (T-003).
+2. **Cert-chain verification implemented; trust root pinning list not
+   yet wired into the default production dial path.** Use
+   `session.TrustedRootAuth(wacert.RootPubKey)` for real deployments
+   (verified against synthetic + tampered chains in tests).
 
 ## Moderate
 
@@ -44,6 +41,11 @@ Honest register. Anything production-relevant lives here until fixed.
     useful for integration, never for wire compatibility claims.
 
 ## Resolved (keep for archaeology)
+
+- 2026-09-23: T-001 CertChain verifier (security/wacert, Ed25519 stdlib)
+  + TrustedRootAuth/PinFirstContact policies; race suite green (T-003):
+  noise.Cipher mutex, session writeMu (seal+send ordering), supervisor
+  m.sess locking, mock server write locks.
 
 - 2026-09-23: Handshake double-finish removed; session now reads once
   via single-reader design (ADR-0003, fixes nondeterministic frame loss).

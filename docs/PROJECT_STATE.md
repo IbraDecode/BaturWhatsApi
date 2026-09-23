@@ -19,7 +19,7 @@ itself 24/7 (supervisor + automatic recovery).
 |----------------------|--------|----------|
 | Architecture         | ✅     | `docs/architecture/ARCHITECTURE.md`, 5 ADRs |
 | Protocol layer       | ✅     | WAWebMulti binary node codec + dictionaries + zlib + pb wire subset; fuzz round-trip (500 cases) |
-| Security layer       | ✅     | Noise_XX_25519_AESGCM_SHA256 (WhatsApp variant), AES-256-GCM ctr ciphers, HKDF RFC 5869 vectors, fail-closed auth policy |
+| Security layer       | ✅     | Noise_XX_25519_AESGCM_SHA256 (WhatsApp variant), AES-256-GCM ctr ciphers, HKDF RFC 5869 vectors, **CertChain Ed25519 verification (wacert)** + fail-closed auth policies |
 | Transport            | ✅     | RFC 6455 WS client (masked, fragmented, ping/pong, size limits) + in-memory pipe |
 | Session engine       | ✅     | full lifecycle, request/response matching, keepalive, stale detection, single-reader concurrency contract |
 | State machine        | ✅     | 10 explicit states, legal-transition enforcement, watchers, forced-recovery path |
@@ -33,7 +33,7 @@ itself 24/7 (supervisor + automatic recovery).
 | Media engine         | ❌     | Phase 3 |
 | Observability        | 🟡     | bus stats, health snapshots, structured logs; metrics endpoints not wired |
 | REST/WS API server   | ❌     | planned (public HTTP/WebSocket wrapper over core; core must stay REST-free) |
-| Testing              | ✅     | 11/11 packages green incl. stress + chaos tests |
+| Testing              | ✅     | 12/12 packages green incl. stress + chaos tests; `-race` full suite CLEAN |
 | Benchmarks           | 🟡     | codec/keygen micro-bench via `batur bench`; session-scale load test pending |
 | CI/CD                | ✅     | GitHub Actions: build, vet, fuzz-smoke tests, race, cross-compile |
 | Deployment           | 🟡     | single-binary model; Dockerfile pending |

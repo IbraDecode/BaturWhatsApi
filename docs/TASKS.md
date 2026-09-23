@@ -7,9 +7,9 @@ Status: TODO / IN_PROGRESS / BLOCKED / DONE.
 
 | # | Task | Status | Notes |
 |---|------|--------|-------|
-| T-001 | Wire cert-chain server verification (Ed25519 + CertChain proto over pb) | TODO | kills first-contact MITM window (ADR-0005) |
+| T-001 | Wire cert-chain server verification (Ed25519 + CertChain proto over pb) | DONE | security/wacert + session.TrustedRootAuth; mock serves real chains |
 | T-002 | Session-scale memory/CPU benchmark harness (idle + message load) | TODO | validates low-memory charter |
-| T-003 | `-race` clean run of full suite (currently passes w/o race) | TODO | fix any races surfaced |
+| T-003 | `-race` clean run of full suite (currently passes w/o race) | DONE | 3 race classes fixed (cipher mutex, session write ordering lock, supervisor sess pointer) |
 | T-004 | Storage hardening: dir fsync on write, manifest crash-test | TODO | ADR-0004 consequences |
 
 ## P1 — protocol completeness

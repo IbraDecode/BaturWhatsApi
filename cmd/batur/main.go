@@ -89,7 +89,7 @@ func doctor() error {
 	if err != nil {
 		return err
 	}
-	s.ServerAuth = func([]byte, []byte) error { return nil }
+	s.ServerAuth = session.TrustedRootAuth(srv.RootPub())
 	if err := s.Start(ctx); err != nil {
 		return fmt.Errorf("engine self-check connect: %w", err)
 	}
@@ -151,7 +151,7 @@ func demo() error {
 	}); err != nil {
 		return err
 	}
-	if err := b.Attach("demo-device", dialer, func([]byte, []byte) error { return nil },
+	if err := b.Attach("demo-device", dialer, session.TrustedRootAuth(srv.RootPub()),
 		session.DeviceInfo{Platform: "web", DeviceName: "demo"}); err != nil {
 		return err
 	}

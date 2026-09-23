@@ -77,7 +77,7 @@ func TestBackpressureBlock(t *testing.T) {
 	if err := b.Publish(ctx, Event{Type: "slow"}); err != nil {
 		t.Fatal(err)
 	}
-	<-entered            // handler is now stuck consuming slot 1
+	<-entered                                                   // handler is now stuck consuming slot 1
 	if err := b.Publish(ctx, Event{Type: "slow"}); err != nil { // fills the queue
 		t.Fatal(err)
 	}

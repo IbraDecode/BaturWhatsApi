@@ -96,7 +96,7 @@ func TestMultiSessionIsolation(t *testing.T) {
 	for _, id := range []string{"alpha", "beta", "gamma"} {
 		if err := sv.Add(supervisor.Config{
 			Session: session.Options{ID: id, Dialer: dialer, Dict: token.Default(),
-				Device: session.DeviceInfo{Platform: "web", DeviceName: id},
+				Device:    session.DeviceInfo{Platform: "web", DeviceName: id},
 				PingEvery: 200 * time.Millisecond},
 			Auth: trustAll(),
 		}); err != nil {

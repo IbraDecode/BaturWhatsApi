@@ -14,24 +14,24 @@ type State string
 
 // Engine states.
 const (
-	Stopped         State = "STOPPED"
-	Starting        State = "STARTING"
-	Connecting      State = "CONNECTING"
-	Authenticating  State = "AUTHENTICATING"
-	Syncing         State = "SYNCING"
-	Online          State = "ONLINE"
-	Degraded        State = "DEGRADED"
-	Reconnecting    State = "RECONNECTING"
-	Error           State = "ERROR"
-	Stopping        State = "STOPPING"
+	Stopped        State = "STOPPED"
+	Starting       State = "STARTING"
+	Connecting     State = "CONNECTING"
+	Authenticating State = "AUTHENTICATING"
+	Syncing        State = "SYNCING"
+	Online         State = "ONLINE"
+	Degraded       State = "DEGRADED"
+	Reconnecting   State = "RECONNECTING"
+	Error          State = "ERROR"
+	Stopping       State = "STOPPING"
 )
 
 // Transition describes a state change with context for observability.
 type Transition struct {
-	From    State
-	To      State
-	Reason  string
-	At      time.Time
+	From   State
+	To     State
+	Reason string
+	At     time.Time
 }
 
 // String renders the transition for logs.
@@ -157,8 +157,6 @@ func (m *Machine) Force(to State, reason string) {
 		notifyWatchers(watchers, tr)
 	}
 }
-
-
 
 // Watch returns a buffered channel of transitions. Call Stop to unsubscribe.
 func (m *Machine) Watch(buffer int) *Watcher {

@@ -44,11 +44,11 @@ var defaultTokensJSON []byte
 
 // Dictionary is a resolved token dictionary usable by encoders and decoders.
 type Dictionary struct {
-	Version        int
-	SingleByte     []string
-	DoubleByte     [][]string
-	singleIndex    map[string]byte
-	doubleIndex    map[string][2]byte
+	Version     int
+	SingleByte  []string
+	DoubleByte  [][]string
+	singleIndex map[string]byte
+	doubleIndex map[string][2]byte
 }
 
 type dictFile struct {

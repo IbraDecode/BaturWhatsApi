@@ -119,11 +119,11 @@ func TestZigzagVectors(t *testing.T) {
 
 func TestMalformed(t *testing.T) {
 	bad := [][]byte{
-		{0xFF},                    // key varint truncated
-		{0x0A, 0x05, 'a', 'b'},    // bytes length overruns
-		{0x0D, 0x01},              // fixed32 truncated
-		{0x07},                    // wire type 7 unsupported
-		{0x08, 0xFF, 0xFF},        // varint field truncated
+		{0xFF},                 // key varint truncated
+		{0x0A, 0x05, 'a', 'b'}, // bytes length overruns
+		{0x0D, 0x01},           // fixed32 truncated
+		{0x07},                 // wire type 7 unsupported
+		{0x08, 0xFF, 0xFF},     // varint field truncated
 	}
 	for _, data := range bad {
 		if _, err := Parse(data); err == nil {

@@ -4,7 +4,17 @@
 
 ```
 ┌─────────────────────────────────────────────────┐
-│  cmd/batur (CLI)                                │
+│  cmd/batur (CLI: version, doctor, bench, demo,  │
+│              serve [--mock] [--media-demo] ...) │
+├─────────────────────────────────────────────────┤
+│  examples/sdk/{python,node,typescript} clients  │
+│  (REST + SSE + WebSocket, zero-dep)             │
+├─────────────────────────────────────────────────┤
+│  apiserver (REST + SSE + WebSocket bridge)      │
+│   ├─ /v1/sessions, /v1/text, /v1/sync, /history │
+│   ├─ /v1/events  (SSE)                          │
+│   └─ /v1/ws      (WS: hello/ping/send/sync/     │
+│                  subscribe/unsubscribe)         │
 ├─────────────────────────────────────────────────┤
 │  api  (public façade, domain models, events)    │
 ├──────────────────────┬──────────────────────────┤
@@ -23,8 +33,13 @@
 │  security/noise (XX/AES-GCM chain)  ┐           │
 │  security/hkdf (RFC 5869)           ┘ security  │
 ├─────────────────────────────────────────────────┤
-│  transport (Conn contract, pipe, ws client)     │
-│  storage (KV abstraction, memory/file)          │
+│  transport (Conn contract, pipe, ws client/server) │
+│  storage (KV abstraction)                       │
+│   ├─ storage/memory      (in-process, default)  │
+│   ├─ storage/file        (atomic temp+rename)   │
+│   ├─ storage/secure      (AES-256-GCM at-rest)  │
+│   └─ storage-adapters/   (sibling module;       │
+│          Postgres / SQLite — ADR-0007)          │
 └─────────────────────────────────────────────────┘
 ```
 
@@ -73,12 +88,21 @@ the only exported surface applications should use. Protocol nodes stay
 internal (`protocol/binary.Node` is not re-exported through api
 signatures in user-facing handlers).
 
+The `apiserver` package is one consumer of `api.*`; SDKs and embedders
+are others. The HTTP, SSE and WebSocket surfaces are versioned under
+`/v1/*` and described in `docs/API.md`.
+
 ## Persistence
 
 Credentials (noise/identity X25519 seeds, registration id, pinned server
 static key, account JID) serialize to JSON under the session KV prefix.
 Process restart → new `Session` with same id/store resumes (verified by
 integration tests).
+
+The default store is the file-backed KV; for multi-node active-active
+deployments a Postgres or SQLite adapter plugs into the same `storage.KV`
+interface — it lives in the sibling `storage-adapters/` module so the
+core stays zero-dep (ADR-0007).
 
 ## Security posture
 

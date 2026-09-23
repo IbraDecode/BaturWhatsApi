@@ -70,7 +70,7 @@ func BenchmarkHandshake(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		s, err := session.New(session.Options{
 			ID: fmt.Sprintf("bench-%d", i), Dialer: dialer, Store: storage.NewMemory(),
-			Device: session.DeviceInfo{Platform: "web"},
+			Device:    session.DeviceInfo{Platform: "web"},
 			PingEvery: time.Hour,
 		})
 		if err != nil {
@@ -107,7 +107,7 @@ func TestSessionFootprint(t *testing.T) {
 	for i := 0; i < n; i++ {
 		s, err := session.New(session.Options{
 			ID: fmt.Sprintf("fp-%d", i), Dialer: dialer, Store: storage.NewMemory(),
-			Device: session.DeviceInfo{Platform: "web", DeviceName: "fp"},
+			Device:    session.DeviceInfo{Platform: "web", DeviceName: "fp"},
 			PingEvery: 10 * time.Second,
 		})
 		if err != nil {

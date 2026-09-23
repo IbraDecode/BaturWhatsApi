@@ -76,6 +76,22 @@ type Credentials struct {
 	ServerStatic   []byte `json:"server_static,omitempty"`
 }
 
+// credsSnapshot returns a copy of the credentials under the read lock.
+func (s *Session) credsSnapshot() Credentials {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.creds == nil {
+		return Credentials{}
+	}
+	return *s.creds
+}
+
+func (s *Session) setCredentials(c *Credentials) {
+	s.mu.Lock()
+	s.creds = c
+	s.mu.Unlock()
+}
+
 func generateCredentials() (*Credentials, error) {
 	noiseKP, err := noise.NewKeyPair()
 	if err != nil {
@@ -199,7 +215,7 @@ func (s *Session) loadCredentials(ctx context.Context) error {
 		if gerr != nil {
 			return gerr
 		}
-		s.creds = gen
+		s.setCredentials(gen)
 		return s.saveCredentials(ctx)
 	}
 	if err != nil {
@@ -209,12 +225,15 @@ func (s *Session) loadCredentials(ctx context.Context) error {
 	if err := json.Unmarshal(raw, &c); err != nil {
 		return fmt.Errorf("session: corrupt credentials: %w", err)
 	}
-	s.creds = &c
+	s.setCredentials(&c)
 	return nil
 }
 
 func (s *Session) saveCredentials(ctx context.Context) error {
-	raw, err := json.Marshal(s.creds)
+	s.mu.RLock()
+	c := *s.creds
+	s.mu.RUnlock()
+	raw, err := json.Marshal(c)
 	if err != nil {
 		return err
 	}
@@ -223,12 +242,7 @@ func (s *Session) saveCredentials(ctx context.Context) error {
 
 // Credentials returns a copy of the session identity.
 func (s *Session) Credentials() Credentials {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	if s.creds == nil {
-		return Credentials{}
-	}
-	return *s.creds
+	return s.credsSnapshot()
 }
 
 // DeviceID is the stable device identifier derived from the session id.
@@ -407,9 +421,7 @@ func (s *Session) keepAliveLoop(ctx context.Context) {
 // handshake (sole reader on conn until serveFrames takes over)
 
 func (s *Session) handshake(ctx context.Context, conn transport.Conn) error {
-	s.mu.RLock()
-	seed := s.creds.NoiseKeySeed
-	s.mu.RUnlock()
+	seed := s.credsSnapshot().NoiseKeySeed
 	noiseKP, err := noise.KeyPairFromSeed(seed)
 	if err != nil {
 		return err
@@ -449,9 +461,9 @@ func (s *Session) handshake(ctx context.Context, conn transport.Conn) error {
 	if err := s.ServerAuth(xx.RemoteStatic(), certPlain); err != nil {
 		return fmt.Errorf("session: server auth: %w", err)
 	}
-	s.mu.Lock()
-	s.creds.ServerStatic = xx.RemoteStatic()
-	s.mu.Unlock()
+	c := s.credsSnapshot()
+	c.ServerStatic = xx.RemoteStatic()
+	s.setCredentials(&c)
 	if err := s.saveCredentials(ctx); err != nil {
 		return err
 	}
@@ -476,9 +488,7 @@ func (s *Session) handshake(ctx context.Context, conn transport.Conn) error {
 }
 
 func (s *Session) finishPayload() []byte {
-	s.mu.RLock()
-	creds := s.creds
-	s.mu.RUnlock()
+	creds := s.credsSnapshot()
 	blob, _ := json.Marshal(map[string]any{
 		"device_id": s.DeviceID(),
 		"name":      s.opts.Device.DeviceName,
@@ -507,9 +517,9 @@ func (s *Session) connectIQ(ctx context.Context) error {
 		return err
 	}
 	if acct, ok := resp.StringAttr("account"); ok && acct != "" {
-		s.mu.Lock()
-		s.creds.AccountJID = acct
-		s.mu.Unlock()
+		c := s.credsSnapshot()
+		c.AccountJID = acct
+		s.setCredentials(&c)
 		_ = s.saveCredentials(ctx)
 	}
 	return nil

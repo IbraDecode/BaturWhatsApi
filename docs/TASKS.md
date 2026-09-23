@@ -28,7 +28,7 @@ Status: TODO / IN_PROGRESS / BLOCKED / DONE.
 | # | Task | Status |
 |---|------|--------|
 | T-201 | Media engine: download/upload pipeline (encrypt/decrypt, refs) | TODO |
-| T-202 | REST + WebSocket API servers over core (core stays REST-free) | TODO |
+| T-202 | REST + WebSocket API servers over core (core stays REST-free) | IN_PROGRESS | v1 REST+SSE live (apiserver/); WS bridge + pairing endpoints TODO |
 | T-203 | SDKs: Python + TypeScript thin clients over API | TODO |
 | T-204 | Postgres/SQLite storage adapters (multi-node) | TODO |
 | T-205 | Metrics endpoint (Prometheus) + structured health | TODO |

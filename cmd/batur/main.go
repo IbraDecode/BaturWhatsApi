@@ -13,11 +13,15 @@ import (
 	"encoding/hex"
 	"flag"
 	"fmt"
+	"log/slog"
 	"os"
+	"os/signal"
 	"runtime"
+	"syscall"
 	"time"
 
 	"github.com/ibradecode/baturwhatsapi/api"
+	"github.com/ibradecode/baturwhatsapi/apiserver"
 	"github.com/ibradecode/baturwhatsapi/events"
 	"github.com/ibradecode/baturwhatsapi/internal/mockserver"
 	"github.com/ibradecode/baturwhatsapi/internal/version"
@@ -46,6 +50,8 @@ func main() {
 		err = bench()
 	case "demo":
 		err = demo()
+	case "serve":
+		err = serve()
 	default:
 		usage()
 		os.Exit(2)
@@ -57,7 +63,7 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintf(os.Stderr, "usage: batur <version|doctor|bench|demo>\n")
+	fmt.Fprintf(os.Stderr, "usage: batur <version|doctor|bench|demo|serve [--bind addr] [--mock]>\n")
 }
 
 func doctor() error {
@@ -181,6 +187,54 @@ func compact(ev events.Event) string {
 	default:
 		return fmt.Sprintf("%v", d)
 	}
+}
+
+func serve() error {
+	fs := flag.NewFlagSet("serve", flag.ExitOnError)
+	bind := fs.String("bind", "127.0.0.1:8080", "HTTP bind address")
+	mock := fs.Bool("mock", false, "run with the in-process mock WhatsApp-web server (API development)")
+	_ = fs.Parse(os.Args[2:])
+
+	dict := token.Default()
+	b, err := api.New(api.Options{Dict: dict})
+	if err != nil {
+		return err
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	if *mock {
+		srv, err := mockserver.New(dict)
+		if err != nil {
+			return err
+		}
+		dialer := mockserver.Dialer{Srv: srv}
+		if err := b.Attach("mock-1", dialer, session.TrustedRootAuth(srv.RootPub()),
+			session.DeviceInfo{Platform: "web", DeviceName: "serve-mock"}); err != nil {
+			return err
+		}
+		if err := b.Start(ctx); err != nil {
+			return err
+		}
+		slog.Info("serve: mock fleet attached", "session", "mock-1")
+	} else {
+		return fmt.Errorf("real WhatsApp-web dialer/registration is pending (docs/TASKS.md T-101..T-103); use --mock for now")
+	}
+	apiSrv, err := apiserver.New(&apiserver.Server{
+		Batur: b, Bind: *bind, Token: os.Getenv("BATUR_API_TOKEN"),
+	})
+	if err != nil {
+		return err
+	}
+	slog.Info("HTTP API listening", "bind", *bind, "auth", os.Getenv("BATUR_API_TOKEN") != "")
+	go func() {
+		if err := apiSrv.ListenAndServe(ctx); err != nil {
+			slog.Error("http server", "err", err)
+			stop()
+		}
+	}()
+	<-ctx.Done()
+	slog.Info("shutting down")
+	return b.Stop(context.Background())
 }
 
 func hexID() string {

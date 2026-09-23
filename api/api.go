@@ -23,6 +23,7 @@ import (
 var (
 	ErrUnknownSession  = errors.New("batur: unknown session")
 	ErrAlreadyAttached = errors.New("batur: session id already attached")
+	ErrNotOnline       = errors.New("batur: session not online")
 	ErrNotImplemented  = errors.New("batur: not implemented in this engine revision")
 )
 
@@ -142,6 +143,25 @@ func (b *Batur) Attach(id string, dialer transport.Dialer, auth session.ServerAu
 	}
 	b.sess[id] = nil // lifecycle owned by supervisor
 	return nil
+}
+
+// Detach removes a session from the fleet (stops it cleanly).
+func (b *Batur) Detach(ctx context.Context, id string) error {
+	if _, ok := b.sess[id]; !ok {
+		return ErrUnknownSession
+	}
+	delete(b.sess, id)
+	return b.sup.Remove(ctx, id)
+}
+
+// RequestNode performs a raw protocol IQ request against one session
+// (bridge capability for the HTTP API / advanced SDKs).
+func (b *Batur) RequestNode(ctx context.Context, id string, n binary.Node) (binary.Node, error) {
+	sess := b.sup.Session(id)
+	if sess == nil {
+		return binary.Node{}, ErrUnknownSession
+	}
+	return sess.Request(ctx, n)
 }
 
 // Start begins supervising all attached sessions.

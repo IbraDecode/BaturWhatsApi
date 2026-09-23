@@ -32,7 +32,7 @@ itself 24/7 (supervisor + automatic recovery).
 | Sync engine          | ❌     | Phase 2 (contacts/chats/history/appstate + checkpoints) |
 | Media engine         | ❌     | Phase 3 |
 | Observability        | 🟡     | bus stats, health snapshots, structured logs; metrics endpoints not wired |
-| REST/WS API server   | ❌     | planned (public HTTP/WebSocket wrapper over core; core must stay REST-free) |
+| REST/WS API server   | 🟡     | apiserver (v1): /health /sessions /iq bridge /SSE events, bearer auth fail-closed, `batur serve`; WSS + pairing endpoints pending |
 | Testing              | ✅     | 12/12 packages green incl. stress + chaos tests; `-race` full suite CLEAN |
 | Benchmarks           | ✅     | `internal/bench`: 100 idle sessions = 119.8 KiB heap/session, ~5 goroutines/session, 52.7K encrypted IQ round-trips/s single session (19µs/op); node codec 2.2µs enc / 3.2µs dec; race + stress green |
 | CI/CD                | ✅     | GitHub Actions: build, vet, fuzz-smoke tests, race, cross-compile |
@@ -44,8 +44,8 @@ itself 24/7 (supervisor + automatic recovery).
 - Go 1.27.1 (installed to `~/.local/go`), GOFLAGS: none, CGO off.
 - Memory 2GB — engine idle RSS target < 20MB/session remains plausible
   (no measurements yet; benchmark task queued).
-- Full test suite runs in ~2s without race instrumentation; race suite
-  needs a longer timeout on this CPU.
+- Full test suite runs in ~2s; `-race` suite green across all 14
+  packages (commit 2026-09-23).
 
 ## Repository layout (current)
 

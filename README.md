@@ -44,6 +44,7 @@ make bench       # codec / crypto micro-benchmarks
 # run the whole engine in one process (mock WhatsApp-web server):
 go run ./cmd/batur demo
 go run ./cmd/batur doctor
+go run ./cmd/batur serve --mock --bind 127.0.0.1:8080   # REST + SSE API
 ```
 
 ## Embedding (library mode)
@@ -61,6 +62,19 @@ b.Bus().MustSubscribe("message.*", 256, 0, func(ctx context.Context, ev events.E
     fmt.Println("message event:", ev.Session)
 })
 b.Start(ctx)
+```
+
+## HTTP API (v1 bridge)
+
+```
+GET  /v1/health                     engine + bus stats (public)
+GET  /v1/sessions                   fleet health
+GET  /v1/sessions/{id}              one session
+DELETE /v1/sessions/{id}            detach
+POST /v1/sessions/{id}/iq           raw protocol bridge
+POST /v1/sessions/{id}/text         501 until the Signal engine (T-101)
+GET  /v1/events                     Server-Sent Events (all types)
+Authorization: Bearer $BATUR_API_TOKEN   (required for non-local bind)
 ```
 
 ## Production notes (current revision)

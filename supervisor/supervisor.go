@@ -258,6 +258,7 @@ func (sv *Supervisor) attempt(ctx context.Context, m *managed, backoff *time.Dur
 	}
 
 	// ONLINE: run stuck-watchdog while watching Done().
+	sv.noteOnline(m.cfg.Session.ID)
 	onlineSince := time.Now()
 	done := sess.Done()
 	watchdog := time.NewTicker(sv.opts.BaseBackoff)
@@ -359,6 +360,18 @@ func (sv *Supervisor) Health() map[string]Status {
 		out[id] = st
 	}
 	return out
+}
+
+// Session returns the live session instance for raw operations (nil if
+// unknown or not yet started). Protocol-level; SDK layers should prefer
+// the api façade.
+func (sv *Supervisor) Session(id string) *session.Session {
+	sv.mu.Lock()
+	defer sv.mu.Unlock()
+	if m, ok := sv.sessions[id]; ok {
+		return m.sess
+	}
+	return nil
 }
 
 // Status is one session's supervisory view.

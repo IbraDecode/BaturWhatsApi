@@ -21,6 +21,7 @@ import (
 	"github.com/ibradecode/baturwhatsapi/internal/wapb"
 	"github.com/ibradecode/baturwhatsapi/protocol/binary"
 	"github.com/ibradecode/baturwhatsapi/protocol/token"
+	"github.com/ibradecode/baturwhatsapi/security/e2e"
 	"github.com/ibradecode/baturwhatsapi/security/noise"
 	"github.com/ibradecode/baturwhatsapi/security/wacert"
 	"github.com/ibradecode/baturwhatsapi/transport"
@@ -31,11 +32,15 @@ type Server struct {
 	Dict   *token.Dictionary
 	Logger *slog.Logger
 
-	mu        sync.Mutex
-	registry  map[string]*Registration // by device id
-	static    *noise.KeyPair
-	rootPriv  ed25519.PrivateKey
-	certChain []byte // signed by root -> intermediate -> leaf(static)
+	mu         sync.Mutex
+	registry   map[string]*Registration  // by device id
+	devices    map[string]*deviceSession // by account JID
+	e2eKeys    e2e.BobKeys
+	e2eRatchet map[string]*e2e.Ratchet // per sender account
+	e2eBundle  *e2e.PreKeyBundle
+	static     *noise.KeyPair
+	rootPriv   ed25519.PrivateKey
+	certChain  []byte // signed by root -> intermediate -> leaf(static)
 	// DropAfterRequests: after this many iq responses the server kills
 	// the client connection (failure injection for supervisor tests).
 	dropAfterRequests int
@@ -62,11 +67,21 @@ func New(dict *token.Dictionary) (*Server, error) {
 		dict = token.Default()
 	}
 	srv := &Server{
-		Dict:     dict,
-		Logger:   slog.Default().With("comp", "mockserver"),
-		registry: map[string]*Registration{},
-		static:   kp,
+		Dict:       dict,
+		Logger:     slog.Default().With("comp", "mockserver"),
+		registry:   map[string]*Registration{},
+		devices:    map[string]*deviceSession{},
+		e2eRatchet: map[string]*e2e.Ratchet{},
+		static:     kp,
 	}
+	bk, _, err := e2e.NewBobKeys()
+	if err != nil {
+		return nil, err
+	}
+	srv.e2eKeys = bk
+	bundle := e2e.BuildBundle(bk.Identity, bk.SignedPreKey, bk.SignedPreID,
+		map[uint32][]byte{bk.OneTimeKeyID: bk.OneTimeKey.Public()})
+	srv.e2eBundle = bundle
 	rootPub, rootPriv, err := ed25519.GenerateKey(rand.Reader)
 	_ = rootPub
 	if err != nil {
@@ -84,6 +99,90 @@ func New(dict *token.Dictionary) (*Server, error) {
 	srv.certChain = wacert.BuildChain(leafDetails, leafSig, interDetails, interSig)
 	srv.rootPriv = rootPriv
 	return srv, nil
+}
+
+// E2EBundle publishes the server endpoint's X3DH bundle (demo recipient).
+func (s *Server) E2EBundle() *e2e.PreKeyBundle { return s.e2eBundle }
+
+// DeviceCount reports live sessions.
+func (s *Server) DeviceCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.devices)
+}
+
+func (s *Server) registerDevice(ds *deviceSession) {
+	s.mu.Lock()
+	s.devices[ds.reg.AccountJID] = ds
+	s.mu.Unlock()
+}
+
+func (s *Server) unregisterDevice(account string, ds *deviceSession) {
+	s.mu.Lock()
+	if cur, ok := s.devices[account]; ok && cur == ds {
+		delete(s.devices, account)
+	}
+	s.mu.Unlock()
+}
+
+func (s *Server) device(account string) *deviceSession {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.devices[account]
+}
+
+// relayE2E decrypts an envelope from connOwner's session and delivers the
+// plaintext to the target device as a server-pushed message.
+func (s *Server) relayE2E(ctx context.Context, sender *deviceSession, n binary.Node) {
+	child, ok := n.ChildByTag("e2e")
+	if !ok {
+		return
+	}
+	raw, ok := child.BytesContent()
+	if !ok {
+		return
+	}
+	env, err := e2e.ParseEnvelope(raw)
+	if err != nil {
+		s.Logger.Warn("e2e envelope parse", "err", err)
+		return
+	}
+	s.mu.Lock()
+	rt := s.e2eRatchet[sender.reg.AccountJID]
+	s.mu.Unlock()
+	var plain []byte
+	if env.Type == e2e.EnvInit || rt == nil {
+		rt, plain, err = e2e.BobSession(s.e2eKeys, env, e2e.ProtocolInfoV1)
+		if err != nil {
+			s.Logger.Warn("e2e init rejected", "err", err)
+			return
+		}
+		s.mu.Lock()
+		s.e2eRatchet[sender.reg.AccountJID] = rt
+		s.mu.Unlock()
+	} else {
+		plain, err = rt.Decrypt(env)
+		if err != nil {
+			s.Logger.Warn("e2e decrypt", "err", err)
+			return
+		}
+	}
+	target := s.device(n.MustStringAttr("to"))
+	if target == nil {
+		s.Logger.Debug("e2e relay: unknown target")
+		return
+	}
+	msg := binary.Node{
+		Tag: "message",
+		Attrs: binary.Attrs{
+			"id":   fmt.Sprintf("E2E%06d", time.Now().UnixNano()%1000000),
+			"from": sender.reg.AccountJID,
+			"to":   target.reg.AccountJID,
+			"type": "text",
+		},
+		Content: []binary.Node{{Tag: "plain", Content: string(plain)}},
+	}
+	s.push(ctx, target, msg)
 }
 
 // RootPub returns the certificate trust root this mock server signed with.
@@ -186,6 +285,8 @@ func (s *Server) ServeConn(ctx context.Context, conn transport.Conn) error {
 		return err
 	}
 	sess.send, sess.recv, sess.conn = send, recv, conn
+	s.registerDevice(sess)
+	defer s.unregisterDevice(sess.reg.AccountJID, sess)
 	s.Logger.Info("device online", "device", reg.DeviceID, "resumed", sess.resumed)
 
 	return s.sessionLoop(ctx, sess)
@@ -254,6 +355,8 @@ func (s *Server) handle(ctx context.Context, ds *deviceSession, n binary.Node) b
 	switch n.Tag {
 	case "xmlstreamend":
 		return true
+	case "message":
+		s.relayE2E(ctx, ds, n)
 	case "a":
 		if s.IgnoreAcks {
 			return false

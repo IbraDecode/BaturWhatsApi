@@ -237,9 +237,9 @@ func (s *Server) hSessionText(w http.ResponseWriter, r *http.Request) {
 	}
 	_, err := s.Batur.SendText(r.Context(), r.PathValue("id"),
 		api.Target{JID: req.To}, req.Text)
-	if errors.Is(err, api.ErrNotImplemented) {
+	if errors.Is(err, api.ErrNoBundleSource) {
 		writeJSON(w, http.StatusNotImplemented, map[string]string{
-			"error": "end-to-end encrypted sending arrives with the Signal engine (docs/TASKS.md T-101/T-102)",
+			"error": "no bundle source configured for this engine instance",
 		})
 		return
 	}

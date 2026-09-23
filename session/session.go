@@ -68,12 +68,13 @@ type DeviceInfo struct {
 // registration, restored from storage afterwards; surviving process
 // restarts is a hard requirement of the engine.
 type Credentials struct {
-	NoiseKeySeed   []byte `json:"noise_key"`
-	IdentitySeed   []byte `json:"identity_key"`
-	RegistrationID uint32 `json:"reg_id"`
-	DeviceID       string `json:"device_id,omitempty"`
-	AccountJID     string `json:"account,omitempty"`
-	ServerStatic   []byte `json:"server_static,omitempty"`
+	NoiseKeySeed    []byte `json:"noise_key"`
+	IdentitySeed    []byte `json:"identity_key"`
+	IdentitySigSeed []byte `json:"identity_sig,omitempty"`
+	RegistrationID  uint32 `json:"reg_id"`
+	DeviceID        string `json:"device_id,omitempty"`
+	AccountJID      string `json:"account,omitempty"`
+	ServerStatic    []byte `json:"server_static,omitempty"`
 }
 
 // credsSnapshot returns a copy of the credentials under the read lock.
@@ -101,14 +102,19 @@ func generateCredentials() (*Credentials, error) {
 	if err != nil {
 		return nil, err
 	}
+	sigSeed := make([]byte, 32)
+	if _, err := rand.Read(sigSeed); err != nil {
+		return nil, err
+	}
 	var reg [4]byte
 	if _, err := rand.Read(reg[:]); err != nil {
 		return nil, err
 	}
 	return &Credentials{
-		NoiseKeySeed:   noiseKP.Seed(),
-		IdentitySeed:   idKP.Seed(),
-		RegistrationID: uint32(reg[0])<<24 | uint32(reg[1])<<16 | uint32(reg[2])<<8 | uint32(reg[3]),
+		NoiseKeySeed:    noiseKP.Seed(),
+		IdentitySeed:    idKP.Seed(),
+		IdentitySigSeed: sigSeed,
+		RegistrationID:  uint32(reg[0])<<24 | uint32(reg[1])<<16 | uint32(reg[2])<<8 | uint32(reg[3]),
 	}, nil
 }
 

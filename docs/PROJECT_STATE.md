@@ -27,8 +27,8 @@ itself 24/7 (supervisor + automatic recovery).
 | Persistence          | ✅     | KV abstraction; memory + file stores; resume-across-restart integration test |
 | Supervisor (24/7)    | ✅     | backoff + jitter, stability reset, stuck watchdog, chaos-reconnect test |
 | Events               | ✅     | ordered bus, block/drop policies, panic isolation, wildcard routing |
-| Public API           | 🟡     | façade + domain Message model + subscriptions; **SendText blocked on Signal engine** (returns ErrNotImplemented) |
-| E2E crypto (Signal)  | ❌     | Phase 2 (identity, prekeys, session establishment, message encryption) |
+| Public API           | ✅     | façade + domain models + subscriptions + **SendText wired end-to-end** (engine-to-engine via mock relay) |
+| E2E crypto (Signal)  | 🟡     | X3DH + Double Ratchet + state persistence DONE (security/e2e, race-clean); WhatsApp SignalMessage wire mapping = T-102 |
 | Sync engine          | ❌     | Phase 2 (contacts/chats/history/appstate + checkpoints) |
 | Media engine         | ❌     | Phase 3 |
 | Observability        | 🟡     | bus stats, health snapshots, structured logs; metrics endpoints not wired |

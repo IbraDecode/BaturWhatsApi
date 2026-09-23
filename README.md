@@ -72,7 +72,7 @@ GET  /v1/sessions                   fleet health
 GET  /v1/sessions/{id}              one session
 DELETE /v1/sessions/{id}            detach
 POST /v1/sessions/{id}/iq           raw protocol bridge
-POST /v1/sessions/{id}/text         501 until the Signal engine (T-101)
+POST /v1/sessions/{id}/text         encrypted send (when a bundle source is wired)
 GET  /v1/events                     Server-Sent Events (all types)
 Authorization: Bearer $BATUR_API_TOKEN   (required for non-local bind)
 ```

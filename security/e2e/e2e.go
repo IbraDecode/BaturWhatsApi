@@ -29,6 +29,10 @@ import (
 
 var randRead = rand.Read
 
+// ProtocolInfoV1 is the HKDF info binding for all engine-to-engine X3DH
+// derivations (protocol revision marker).
+var ProtocolInfoV1 = []byte("baturwhatsapi-e2e-v1")
+
 // Errors.
 var (
 	ErrBadKey        = errors.New("e2e: invalid key material")

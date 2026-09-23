@@ -4,11 +4,12 @@ Honest register. Anything production-relevant lives here until fixed.
 
 ## Critical (P0/P1)
 
-1. **No Signal e2e crypto yet.** `api.SendText` returns
-   `ErrNotImplemented`. The engine can connect, authenticate, exchange
-   protocol nodes and stream events, but cannot yet encrypt/decrypt
-   WhatsApp messages end-to-end. Until T-101/T-102 land, this is NOT a
-   messaging product. Status: open.
+1. **e2e engine (X3DH + Double Ratchet) implemented and wired into
+   `api.SendText`, but not yet against a LIVE WhatsApp relay.** Current
+   end-to-end proof: two engine sessions through the mock relay (server
+   acts as recipient endpoint). WhatsApp's SignalMessage/Cert wrapping is
+   T-102; the mock-relay semantic (server decrypts) is demo-only and
+   MUST NOT be used for production routing. Status: partially resolved.
 2. **Cert-chain verification implemented; trust root pinning list not
    yet wired into the default production dial path.** Use
    `session.TrustedRootAuth(wacert.RootPubKey)` for real deployments

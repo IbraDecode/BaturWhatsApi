@@ -68,6 +68,8 @@ type SessionStatus struct {
 
 // Options configure a Batur instance.
 type Options struct {
+	// BundleSource resolves peers for encrypted sending (SendText).
+	BundleSource BundleSource
 	// Store persists session credentials across restarts. Defaults to an
 	// in-memory store.
 	Store storage.KV
@@ -84,12 +86,13 @@ type Options struct {
 
 // Batur is the engine entrypoint.
 type Batur struct {
-	opts Options
-	bus  *events.Bus
-	owns bool
-	sup  *supervisor.Supervisor
-	dict *token.Dictionary
-	sess map[string]*session.Session
+	opts    Options
+	bus     *events.Bus
+	owns    bool
+	sup     *supervisor.Supervisor
+	dict    *token.Dictionary
+	sess    map[string]*session.Session
+	bundles BundleSource
 }
 
 // New creates an engine instance.
@@ -116,7 +119,7 @@ func New(opts Options) (*Batur, error) {
 	})
 	return &Batur{
 		opts: opts, bus: bus, owns: owns, sup: sv, dict: dict,
-		sess: map[string]*session.Session{},
+		sess: map[string]*session.Session{}, bundles: opts.BundleSource,
 	}, nil
 }
 
@@ -242,11 +245,4 @@ func toMessage(n binary.Node, sessID string) Message {
 		m.RawAttrs[k] = v
 	}
 	return m
-}
-
-// SendText is wired once the Signal crypto engine lands (Phase 2). It is
-// declared now so the public API surface is stable and callers can
-// compile against it.
-func (b *Batur) SendText(ctx context.Context, sessionID string, to Target, text string) (string, error) {
-	return "", ErrNotImplemented
 }

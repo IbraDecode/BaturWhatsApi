@@ -98,7 +98,7 @@ Zero-dependency SDK examples that speak the REST + WS API live in
   forces recovery; `session.ready` / `connection.state` events are the
   health signal.
 - Graceful shutdown: `batur.Stop(ctx)` stops all sessions cleanly.
-- Metrics, Docker image, Postgres adapter: queued (see `docs/TASKS.md`).
+- Metrics, Docker image, systemd kit shipped; Postgres adapter queued (see `docs/TASKS.md`).
 
 ## Documentation
 

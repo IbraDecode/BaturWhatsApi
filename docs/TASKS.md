@@ -29,12 +29,12 @@ Status: TODO / IN_PROGRESS / BLOCKED / DONE.
 | # | Task | Status |
 |---|------|--------|
 | T-201 | Media engine: download/upload pipeline (encrypt/decrypt, refs) | TODO |
-| T-202 | REST + WebSocket API servers over core (core stays REST-free) | IN_PROGRESS | v1 REST+SSE live (apiserver/); WS bridge + pairing endpoints TODO |
+| T-202 | REST + WebSocket API servers over core (core stays REST-free) | IN_PROGRESS | v1 REST+SSE+WS bridge live (apiserver/); device pairing/registration endpoints pending |
 | T-203 | SDKs: Python + TypeScript thin clients over API | TODO |
 | T-204 | Postgres/SQLite storage adapters (multi-node) | TODO |
 | T-205 | Metrics endpoint (Prometheus) + structured health | DONE | /metrics text/0.0.4 (T-205, 2026-09-23) |
 | T-206 | Group/newsletter domain models + operations | TODO |
-| T-207 | Dockerfile + systemd/24/7 deployment kit | TODO |
+| T-207 | Dockerfile + systemd/24/7 deployment kit | IN_PROGRESS | Dockerfile (scratch+CGO=0) + docs/deploy (unit, keygen, TLS note); image build not locally testable (no docker) |
 | T-208 | Protocol fuzz corpus + regression fixtures from real captures | TODO |
 
 ## P3 — polish

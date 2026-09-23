@@ -1,0 +1,24 @@
+[Unit]
+Description=BaturWhatsApi 24/7 session runtime
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Replace with the path of the distributed binary (see docs/deploy).
+ExecStart=/usr/local/bin/batur serve --data /var/lib/batur \
+  --seal-key-file /etc/batur/master.key \
+  --bind 127.0.0.1:8080
+EnvironmentFile=-/etc/batur/env
+Restart=on-failure
+RestartSec=5s
+TimeoutStartSec=30s
+TimeoutStopSec=20s
+
+# Secrets: never put the token or key on the command line visible in /proc;
+# use EnvironmentFile (chmod 600). The data dir is sealed with the master
+# key; if the key is missing the runtime fails closed instead of regrowing
+# identities.
+
+[Install]
+WantedBy=multi-user.target

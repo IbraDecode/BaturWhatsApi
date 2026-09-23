@@ -16,6 +16,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"sync"
 
 	"github.com/ibradecode/baturwhatsapi/security/hkdf"
 )
@@ -53,8 +54,11 @@ func iv(counter uint32) []byte {
 }
 
 // Cipher is a transport-direction AEAD stream (AES-256-GCM, big-endian
-// counter IV starting at zero).
+// counter IV starting at zero). It is safe for concurrent use; NOTE that
+// callers must keep wire order equal to Seal order or the peer counter
+// desyncs — engines guard seal+send together (see ADR-0003).
 type Cipher struct {
+	mu      sync.Mutex
 	aead    cipher.AEAD
 	counter uint32
 }
@@ -64,6 +68,8 @@ func NewCipher(key []byte) *Cipher { return &Cipher{aead: gcm(key)} }
 
 // Seal encrypts with the next counter value.
 func (c *Cipher) Seal(dst, plaintext []byte) []byte {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	out := c.aead.Seal(dst, iv(c.counter), plaintext, nil)
 	c.counter++
 	return out
@@ -71,6 +77,8 @@ func (c *Cipher) Seal(dst, plaintext []byte) []byte {
 
 // Open decrypts with the next counter value.
 func (c *Cipher) Open(dst, ciphertext []byte) ([]byte, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	out, err := c.aead.Open(dst, iv(c.counter), ciphertext, nil)
 	c.counter++
 	if err != nil {
@@ -80,7 +88,11 @@ func (c *Cipher) Open(dst, ciphertext []byte) ([]byte, error) {
 }
 
 // Counter exposes the nonce counter for persistence/health checks.
-func (c *Cipher) Counter() uint32 { return c.counter }
+func (c *Cipher) Counter() uint32 {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.counter
+}
 
 // Handshake implements the symmetric Noise state (h, ck, AES-GCM cipher)
 // shared by initiator and responder.

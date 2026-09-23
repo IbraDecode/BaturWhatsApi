@@ -173,6 +173,7 @@ type deviceSession struct {
 	send     *noise.Cipher
 	recv     *noise.Cipher
 	mu       sync.Mutex
+	writeMu  sync.Mutex
 	conn     transport.Conn
 	reqCount int
 }
@@ -226,7 +227,6 @@ func (s *Server) handle(ctx context.Context, ds *deviceSession, n binary.Node) b
 		ds.conn.Close()
 		return true
 	}
-	conn, send := ds.conn, ds.send
 	switch n.Tag {
 	case "xmlstreamend":
 		return true
@@ -235,7 +235,7 @@ func (s *Server) handle(ctx context.Context, ds *deviceSession, n binary.Node) b
 			return false
 		}
 		// ping -> ack via ib
-		s.push(ctx, conn, send, binary.Node{
+		s.push(ctx, ds, binary.Node{
 			Tag: "ib", Attrs: binary.Attrs{"from": ds.reg.AccountJID},
 			Content: []binary.Node{{Tag: "ack", Attrs: n.Attrs}},
 		})
@@ -251,7 +251,7 @@ func (s *Server) handle(ctx context.Context, ds *deviceSession, n binary.Node) b
 						Attrs: binary.Attrs{"msg": c.MustStringAttr("msg")}})
 				}
 			}
-			s.push(ctx, conn, send, binary.Node{
+			s.push(ctx, ds, binary.Node{
 				Tag: "iq", Attrs: binary.Attrs{"id": id, "type": "result"},
 				Content: echo,
 			})
@@ -263,14 +263,13 @@ func (s *Server) handle(ctx context.Context, ds *deviceSession, n binary.Node) b
 					"account": ds.reg.AccountJID,
 				},
 			}
-			s.push(ctx, conn, send, resp)
+			s.push(ctx, ds, resp)
 		}
 	}
 	return false
 }
 
 func (s *Server) pushMessage(ctx context.Context, ds *deviceSession, text string) {
-	conn, send := ds.conn, ds.send
 	msg := binary.Node{
 		Tag: "message",
 		Attrs: binary.Attrs{
@@ -280,14 +279,15 @@ func (s *Server) pushMessage(ctx context.Context, ds *deviceSession, text string
 		},
 		Content: []binary.Node{{Tag: "plain", Content: text}},
 	}
-	s.push(ctx, conn, send, msg)
+	s.push(ctx, ds, msg)
 }
 
-func (s *Server) push(ctx context.Context, conn transport.Conn, send *noise.Cipher, n binary.Node) {
-	ds := send
+func (s *Server) push(ctx context.Context, ds *deviceSession, n binary.Node) {
 	plain := binary.MarshalDict(n, s.Dict)
-	ct := ds.Seal(nil, plain)
-	_ = conn.SendBinary(ctx, ct)
+	ds.writeMu.Lock()
+	defer ds.writeMu.Unlock()
+	ct := ds.send.Seal(nil, plain)
+	_ = ds.conn.SendBinary(ctx, ct)
 }
 
 func recvTimeout(ctx context.Context, conn transport.Conn, d time.Duration) ([]byte, error) {

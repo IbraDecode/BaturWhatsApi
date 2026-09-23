@@ -110,6 +110,7 @@ type Session struct {
 	dict  *token.Dictionary
 
 	conn         transport.Conn // set once dial succeeds; guarded by connMu
+	writeMu      sync.Mutex     // serializes seal+send (wire order == counter order)
 	connMu       sync.Mutex
 	connReady    chan struct{} // closed when conn is dialed (or dial failed)
 	broken       chan struct{} // closed once when the connection task ends
@@ -529,6 +530,8 @@ func (s *Session) Send(ctx context.Context, n binary.Node) error {
 		return ErrNotOnline
 	}
 	plain := binary.MarshalDict(n, s.dict)
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
 	ct := send.Seal(nil, plain)
 	return conn.SendBinary(ctx, ct)
 }

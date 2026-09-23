@@ -140,8 +140,11 @@ func (sv *Supervisor) Remove(ctx context.Context, id string) error {
 	if m.cancel != nil {
 		m.cancel()
 	}
-	if m.sess != nil {
-		return m.sess.Stop(ctx)
+	sv.mu.Lock()
+	sess := m.sess
+	sv.mu.Unlock()
+	if sess != nil {
+		return sess.Stop(ctx)
 	}
 	return nil
 }
@@ -242,7 +245,9 @@ func (sv *Supervisor) attempt(ctx context.Context, m *managed, backoff *time.Dur
 		return err
 	}
 	sess.ServerAuth = m.cfg.Auth
+	sv.mu.Lock()
 	m.sess = sess
+	sv.mu.Unlock()
 
 	if err := sess.Start(ctx); err != nil {
 		if isFatalAuth(err) {
@@ -343,10 +348,11 @@ func (sv *Supervisor) Health() map[string]Status {
 	for id, m := range sv.sessions {
 		st := Status{ID: id}
 		if m.sess != nil {
-			st.State = m.sess.State()
+			sess := m.sess
+			st.State = sess.State()
 			st.Retries = sv.retries[id]
 			st.LastOnline = sv.lastOnline[id]
-			st.Creds = m.sess.Credentials()
+			st.Creds = sess.Credentials()
 		} else {
 			st.State = statemachine.Stopped
 		}

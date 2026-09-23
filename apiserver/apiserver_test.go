@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -15,6 +16,7 @@ import (
 	"github.com/ibradecode/baturwhatsapi/protocol/binary"
 	"github.com/ibradecode/baturwhatsapi/protocol/token"
 	"github.com/ibradecode/baturwhatsapi/session"
+	"github.com/ibradecode/baturwhatsapi/statemachine"
 	"github.com/ibradecode/baturwhatsapi/storage"
 )
 
@@ -217,4 +219,48 @@ func TestSessionDelete(t *testing.T) {
 	if r2.StatusCode != 404 {
 		t.Fatal("session still listed")
 	}
+}
+
+func TestMetricsEndpoint(t *testing.T) {
+	s, _, cleanup := newTestServer(t, "")
+	defer cleanup()
+	// force an ONLINE reading eventually
+	waitOnlineSimple(t, s)
+	resp, err := http.Get(s.testURL + "/metrics")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		t.Fatalf("metrics status %d", resp.StatusCode)
+	}
+	body := readAll(t, resp.Body)
+	for _, want := range []string{
+		"batur_session_state{session=\"http-dev\"",
+		"batur_goroutines ",
+		"batur_heap_alloc_bytes ",
+		"# TYPE batur_online_sessions gauge",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("metrics missing %q\n%s", want, body[:min(500, len(body))])
+		}
+	}
+}
+
+func waitOnlineSimple(t *testing.T, s *Server) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		st, err := s.Batur.Status("http-dev")
+		if err == nil && st.State == string(statemachine.Online) {
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
+func readAll(t *testing.T, r io.Reader) string {
+	t.Helper()
+	b, _ := io.ReadAll(r)
+	return string(b)
 }

@@ -56,6 +56,7 @@ func New(s *Server) (*Server, error) {
 	mux.HandleFunc("POST /v1/sessions/{id}/iq", s.hSessionIQ)
 	mux.HandleFunc("POST /v1/sessions/{id}/text", s.hSessionText)
 	mux.HandleFunc("GET /v1/events", s.hEvents)
+	mux.HandleFunc("GET /metrics", s.hMetrics)
 	s.srv = &http.Server{
 		Addr:         s.Bind,
 		Handler:      s.auth(mux),

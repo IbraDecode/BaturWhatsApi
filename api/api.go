@@ -203,6 +203,19 @@ func (b *Batur) Status(id string) (SessionStatus, error) {
 // Sessions lists attached session ids.
 func (b *Batur) Sessions() []string { return b.sup.Sessions() }
 
+// Health returns the supervisory status of every session, keyed by id.
+func (b *Batur) Health() map[string]SessionStatus {
+	raw := b.sup.Health()
+	out := make(map[string]SessionStatus, len(raw))
+	for id, h := range raw {
+		out[id] = SessionStatus{
+			ID: h.ID, State: string(h.State), Retries: h.Retries,
+			LastOnline: h.LastOnline, Account: h.Creds.AccountJID,
+		}
+	}
+	return out
+}
+
 // Subscribe helpers -------------------------------------------------------
 
 // OnMessage registers a handler for messages received on sessionID (""

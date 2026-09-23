@@ -31,7 +31,7 @@ Status: TODO / IN_PROGRESS / BLOCKED / DONE.
 | T-201 | Media engine: download/upload pipeline (encrypt/decrypt, refs) | IN_PROGRESS | Attachment envelope parsing (api.Media: image/video/audio/document/location/contact/sticker/app via legacy-XML child tags) + history `media` field + mock image demo, all -race green; upload/download + protobuf descriptor mapping pending (needs live capture) |
 | T-202 | REST + WebSocket API servers over core (core stays REST-free) | IN_PROGRESS | v1 REST+SSE+WS bridge live (apiserver/); device pairing/registration endpoints pending |
 | T-203 | SDKs: Python + TypeScript thin clients over API | DONE | Python (REST+SSE+WS RFC6455 stdlib), Node (fetch+global WebSocket), TypeScript (types, runs on Node22 type-stripping); ALL subcommands verified live vs serve --mock (health/sessions/get/text/events-SSE/ws) |
-| T-204 | Postgres/SQLite storage adapters (multi-node) | TODO |
+| T-204 | Postgres/SQLite storage adapters (multi-node) | IN_PROGRESS | ADR-0007 (sibling `storage-adapters/` module, keeps core zero-dep) |
 | T-205 | Metrics endpoint (Prometheus) + structured health | DONE | /metrics text/0.0.4 (T-205, 2026-09-23) |
 | T-206 | Group/newsletter domain models + operations | TODO |
 | T-207 | Dockerfile + systemd/24/7 deployment kit | IN_PROGRESS | Dockerfile (scratch+CGO=0) + docs/deploy (unit, keygen, TLS note); image build not locally testable (no docker) |

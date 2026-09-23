@@ -63,3 +63,17 @@ jobs:
           go-version: '1.24.x'
       - name: micro-bench
         run: go run ./cmd/batur bench
+
+  fuzz:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.x'
+      - name: codec fuzz (5s/target)
+        run: |
+          go test -run '^$' -fuzz=FuzzDecodeDefault -fuzztime=5s ./protocol/binary/
+          go test -run '^$' -fuzz=FuzzEncodeNode   -fuzztime=5s ./protocol/binary/
+          go test -run '^$' -fuzz=FuzzParse        -fuzztime=5s ./protocol/pb/

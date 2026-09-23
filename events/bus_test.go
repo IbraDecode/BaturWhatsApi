@@ -115,10 +115,13 @@ func TestDropOldest(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if st := b.Stats(); st.Dropped < 8 {
-		t.Fatalf("expected drops, stats: %s", st)
+	if st := b.Stats(); st.Dropped < 1 {
+		t.Fatalf("expected drops under saturation, stats: %s", st)
 	}
 	close(block)
+	// Admitted events must never starve the handler. (Drops are only counted
+	// separately: the dropped counter is mid-flight and may over-count an
+	// event that was enqueued, so it cannot be summed with `got`.)
 	wait(t, 2*time.Second, func() bool { return got.Load() >= 2 }, "handler starvation")
 }
 

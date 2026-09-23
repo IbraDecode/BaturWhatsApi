@@ -5,8 +5,12 @@
 Single binary `batur` + data directory:
 
 ```
-bin/batur doctor            # self-check (keygen, codec, engine connect)
+bin/batur doctor            # self-check (keygen, codec, engine connect, e2e)
 bin/batur demo              # in-process smoke (mock server)
+bin/batur serve --mock --data /var/lib/batur --bind 127.0.0.1:8080
+                            # REST+SSE API; sessions persist in --data
+                            # BATUR_API_TOKEN env enables bearer auth (required
+                            # for non-localhost binds)
 ```
 
 Embedded usage (recommended today): import `api`, provide a

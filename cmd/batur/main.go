@@ -27,9 +27,11 @@ import (
 	"github.com/ibradecode/baturwhatsapi/internal/version"
 	"github.com/ibradecode/baturwhatsapi/protocol/binary"
 	"github.com/ibradecode/baturwhatsapi/protocol/token"
+	"github.com/ibradecode/baturwhatsapi/security/e2e"
 	"github.com/ibradecode/baturwhatsapi/security/noise"
 	"github.com/ibradecode/baturwhatsapi/session"
 	"github.com/ibradecode/baturwhatsapi/statemachine"
+	"github.com/ibradecode/baturwhatsapi/storage"
 )
 
 func main() {
@@ -100,7 +102,33 @@ func doctor() error {
 		return fmt.Errorf("engine self-check connect: %w", err)
 	}
 	fmt.Printf("engine self-check: ONLINE in %v\n", time.Since(start).Round(time.Millisecond))
-	return s.Stop(ctx)
+	if err := s.Stop(ctx); err != nil {
+		return err
+	}
+	// e2e mini-exchange self check
+	start = time.Now()
+	bk, bundle, err := e2e.NewBobKeys()
+	if err != nil {
+		return err
+	}
+	aid, err := e2e.NewIdentity()
+	if err != nil {
+		return err
+	}
+	ra, err := e2e.AliceSession(bundle, aid, e2e.ProtocolInfoV1)
+	if err != nil {
+		return err
+	}
+	env, err := ra.Encrypt([]byte("doctor"))
+	if err != nil {
+		return err
+	}
+	_, plain, err := e2e.BobSession(bk, env, e2e.ProtocolInfoV1)
+	if err != nil || string(plain) != "doctor" {
+		return fmt.Errorf("e2e self-check failed: %v", err)
+	}
+	fmt.Printf("e2e self-check: X3DH+DR handshake ok in %v\n", time.Since(start).Round(time.Millisecond))
+	return nil
 }
 
 func bench() error {
@@ -192,18 +220,32 @@ func compact(ev events.Event) string {
 func serve() error {
 	fs := flag.NewFlagSet("serve", flag.ExitOnError)
 	bind := fs.String("bind", "127.0.0.1:8080", "HTTP bind address")
+	data := fs.String("data", "", "session data directory (empty = ephemeral in-memory)")
 	mock := fs.Bool("mock", false, "run with the in-process mock WhatsApp-web server (API development)")
 	_ = fs.Parse(os.Args[2:])
 
 	dict := token.Default()
-	b, err := api.New(api.Options{Dict: dict})
-	if err != nil {
-		return err
-	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	var ao api.Options = api.Options{Dict: dict}
+	if *data != "" {
+		store, err := storage.NewFileStore(*data)
+		if err != nil {
+			return err
+		}
+		defer store.Close()
+		ao.Store = store
+	}
+	var b *api.Batur
 	if *mock {
 		srv, err := mockserver.New(dict)
+		if err != nil {
+			return err
+		}
+		ao.BundleSource = func(context.Context, api.Target) (*e2e.PreKeyBundle, error) {
+			return srv.E2EBundle(), nil
+		}
+		b, err = api.New(ao)
 		if err != nil {
 			return err
 		}
@@ -215,7 +257,7 @@ func serve() error {
 		if err := b.Start(ctx); err != nil {
 			return err
 		}
-		slog.Info("serve: mock fleet attached", "session", "mock-1")
+		slog.Info("serve: mock fleet attached", "session", "mock-1", "data", *data)
 	} else {
 		return fmt.Errorf("real WhatsApp-web dialer/registration is pending (docs/TASKS.md T-101..T-103); use --mock for now")
 	}

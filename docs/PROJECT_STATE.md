@@ -1,6 +1,6 @@
 # PROJECT STATE — BaturWhatsApi
 
-Updated: 2026-09-23 · Engine: v0.1.0 (development channel) · Branch: `main`
+Updated: 2026-09-23 · Engine: v0.1.1 (development channel) · Branch: `main` · Release: [v0.1.1](https://github.com/IbraDecode/BaturWhatsApi/releases/tag/v0.1.1)
 
 ## Snapshot
 

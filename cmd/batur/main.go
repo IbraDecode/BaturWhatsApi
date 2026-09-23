@@ -111,6 +111,8 @@ func applyLogOpts(level, format string) error {
 func doctor() error {
 	fs := flag.NewFlagSet("doctor", flag.ExitOnError)
 	asJSON := fs.Bool("json", false, "emit a single JSON document instead of human-readable lines")
+	skipEngine := fs.Bool("skip-engine", false, "skip the engine self-check (requires in-process mock dial)")
+	skipE2E := fs.Bool("skip-e2e", false, "skip the e2e X3DH+DR handshake self-check")
 	_ = fs.Parse(os.Args[2:])
 	type doctorReport struct {
 		Go             string `json:"go"`
@@ -150,48 +152,52 @@ func doctor() error {
 		rep.CodecWarmErr = err.Error()
 	}
 	start = time.Now()
-	srv, err := mockserver.New(dict)
-	if err != nil {
-		return err
-	}
-	dialer := mockserver.Dialer{Srv: srv}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	s, err := session.New(session.Options{ID: "doctor-" + hexID()[:6], Dialer: dialer, Dict: dict,
-		Device: session.DeviceInfo{Platform: "web", DeviceName: "doctor"}})
-	if err != nil {
-		return err
-	}
-	s.ServerAuth = session.TrustedRootAuth(srv.RootPub())
-	if err := s.Start(ctx); err != nil {
-		return fmt.Errorf("engine self-check connect: %w", err)
-	}
-	rep.EngineOnlineNs = time.Since(start).Nanoseconds()
-	if err := s.Stop(ctx); err != nil {
-		return err
+	if !*skipEngine {
+		srv, err := mockserver.New(dict)
+		if err != nil {
+			return err
+		}
+		dialer := mockserver.Dialer{Srv: srv}
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		s, err := session.New(session.Options{ID: "doctor-" + hexID()[:6], Dialer: dialer, Dict: dict,
+			Device: session.DeviceInfo{Platform: "web", DeviceName: "doctor"}})
+		if err != nil {
+			return err
+		}
+		s.ServerAuth = session.TrustedRootAuth(srv.RootPub())
+		if err := s.Start(ctx); err != nil {
+			return fmt.Errorf("engine self-check connect: %w", err)
+		}
+		rep.EngineOnlineNs = time.Since(start).Nanoseconds()
+		if err := s.Stop(ctx); err != nil {
+			return err
+		}
 	}
 	start = time.Now()
-	bk, bundle, err := e2e.NewBobKeys()
-	if err != nil {
-		return err
+	if !*skipE2E {
+		bk, bundle, err := e2e.NewBobKeys()
+		if err != nil {
+			return err
+		}
+		aid, err := e2e.NewIdentity()
+		if err != nil {
+			return err
+		}
+		ra, err := e2e.AliceSession(bundle, aid, e2e.ProtocolInfoV1)
+		if err != nil {
+			return err
+		}
+		env, err := ra.Encrypt([]byte("doctor"))
+		if err != nil {
+			return err
+		}
+		_, plain, err := e2e.BobSession(bk, env, e2e.ProtocolInfoV1)
+		if err != nil || string(plain) != "doctor" {
+			return fmt.Errorf("e2e self-check failed: %v", err)
+		}
+		rep.E2ESelfCheckNs = time.Since(start).Nanoseconds()
 	}
-	aid, err := e2e.NewIdentity()
-	if err != nil {
-		return err
-	}
-	ra, err := e2e.AliceSession(bundle, aid, e2e.ProtocolInfoV1)
-	if err != nil {
-		return err
-	}
-	env, err := ra.Encrypt([]byte("doctor"))
-	if err != nil {
-		return err
-	}
-	_, plain, err := e2e.BobSession(bk, env, e2e.ProtocolInfoV1)
-	if err != nil || string(plain) != "doctor" {
-		return fmt.Errorf("e2e self-check failed: %v", err)
-	}
-	rep.E2ESelfCheckNs = time.Since(start).Nanoseconds()
 
 	if *asJSON {
 		enc := json.NewEncoder(os.Stdout)
@@ -205,9 +211,17 @@ func doctor() error {
 	fmt.Printf("x25519 keygen: %v\n", time.Duration(rep.X25519KeygenNs).Round(time.Microsecond))
 	fmt.Printf("codec warm: %v (%d bytes) err=%v\n",
 		time.Duration(rep.CodecWarmNs).Round(time.Microsecond), rep.CodecWarmBytes, err)
-	fmt.Printf("engine self-check: ONLINE in %v\n", time.Duration(rep.EngineOnlineNs).Round(time.Millisecond))
-	fmt.Printf("e2e self-check: X3DH+DR handshake ok in %v\n",
-		time.Duration(rep.E2ESelfCheckNs).Round(time.Millisecond))
+	if !*skipEngine {
+		fmt.Printf("engine self-check: ONLINE in %v\n", time.Duration(rep.EngineOnlineNs).Round(time.Millisecond))
+	} else {
+		fmt.Println("engine self-check: skipped")
+	}
+	if !*skipE2E {
+		fmt.Printf("e2e self-check: X3DH+DR handshake ok in %v\n",
+			time.Duration(rep.E2ESelfCheckNs).Round(time.Millisecond))
+	} else {
+		fmt.Println("e2e self-check: skipped")
+	}
 	return nil
 }
 

@@ -233,12 +233,14 @@ func serve() error {
 	mock := fs.Bool("mock", false, "run with the in-process mock WhatsApp-web server (API development)")
 	sealKey := fs.String("seal-key", "", "64-hex master key sealing secrets at rest (or $BATUR_MASTER_KEY, or --seal-key-file)")
 	sealFile := fs.String("seal-key-file", "", "file containing the master key hex")
+	history := fs.Bool("history", true, "persist bounded per-chat message history")
+	sync := fs.Bool("sync", false, "auto-sync contacts/chats on session ready")
 	_ = fs.Parse(os.Args[2:])
 
 	dict := token.Default()
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	var ao api.Options = api.Options{Dict: dict}
+	var ao api.Options = api.Options{Dict: dict, History: *history, Sync: api.SyncOptions{Enabled: *sync}}
 	masterHex := strings.TrimSpace(*sealKey)
 	if masterHex == "" {
 		masterHex = os.Getenv("BATUR_MASTER_KEY")

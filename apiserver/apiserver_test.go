@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -15,6 +16,7 @@ import (
 	"github.com/ibradecode/baturwhatsapi/internal/mockserver"
 	"github.com/ibradecode/baturwhatsapi/protocol/binary"
 	"github.com/ibradecode/baturwhatsapi/protocol/token"
+	"github.com/ibradecode/baturwhatsapi/security/e2e"
 	"github.com/ibradecode/baturwhatsapi/session"
 	"github.com/ibradecode/baturwhatsapi/statemachine"
 	"github.com/ibradecode/baturwhatsapi/storage"
@@ -304,4 +306,64 @@ func TestSyncEndpoints(t *testing.T) {
 	if ru.StatusCode != 404 {
 		t.Fatalf("unknown sync status = %d", ru.StatusCode)
 	}
+}
+
+func TestHistoryEndpoint(t *testing.T) {
+	dict := token.Default()
+	srv, err := mockserver.New(dict)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dialer := mockserver.Dialer{Srv: srv}
+	b, err := api.New(api.Options{Dict: dict, History: true,
+		BundleSource: func(context.Context, api.Target) (*e2e.PreKeyBundle, error) {
+			return srv.E2EBundle(), nil
+		}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := b.Attach("hist", dialer, session.TrustedRootAuth(srv.RootPub()),
+		session.DeviceInfo{Platform: "web"}); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if err := b.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	defer b.Stop(context.Background())
+	for i := 0; i < 200; i++ {
+		if st, err := b.Status("hist"); err == nil && st.State == api.StateOnline && st.Account != "" {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	st, _ := b.Status("hist")
+	if _, err := b.SendText(ctx, "hist", api.Target{JID: st.Account}, "endpoint history"); err != nil {
+		t.Fatal(err)
+	}
+	s := &Server{Batur: b}
+	s, err = New(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := httptest.NewServer(s.srv.Handler)
+	defer ts.Close()
+	// wait for persistence
+	var body string
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		resp, err := http.Get(ts.URL + "/v1/sessions/hist/history?chat=" + url.QueryEscape(st.Account))
+		if err != nil {
+			t.Fatal(err)
+		}
+		b1, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		body = string(b1)
+		if strings.Contains(body, "endpoint history") {
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatalf("message not in history endpoint: %s", body)
 }

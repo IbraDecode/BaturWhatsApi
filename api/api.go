@@ -83,6 +83,9 @@ type Options struct {
 	// Sync opts into automatic contacts/chats snapshotting on session
 	// ready (and optionally periodic re-sync).
 	Sync SyncOptions
+	// History enables bounded per-chat message persistence with ack
+	// state tracking (queryable via History()/RecentChats()).
+	History bool
 	// Recovery tuning.
 	BaseBackoff time.Duration
 	MaxBackoff  time.Duration
@@ -91,14 +94,16 @@ type Options struct {
 
 // Batur is the engine entrypoint.
 type Batur struct {
-	opts    Options
-	bus     *events.Bus
-	owns    bool
-	sup     *supervisor.Supervisor
-	dict    *token.Dictionary
-	sess    map[string]*session.Session
-	bundles BundleSource
-	syncSub *events.Subscription
+	opts     Options
+	bus      *events.Bus
+	owns     bool
+	sup      *supervisor.Supervisor
+	dict     *token.Dictionary
+	sess     map[string]*session.Session
+	bundles  BundleSource
+	syncSub  *events.Subscription
+	history  *HistoryStore
+	histSubs []*events.Subscription
 }
 
 // New creates an engine instance.
@@ -130,10 +135,14 @@ func New(opts Options) (*Batur, error) {
 		MaxBackoff:  opts.MaxBackoff,
 		StableReset: opts.StableReset,
 	})
-	return &Batur{
+	out := &Batur{
 		opts: opts, bus: bus, owns: owns, sup: sv, dict: dict,
 		sess: map[string]*session.Session{}, bundles: opts.BundleSource,
-	}, nil
+	}
+	if opts.History {
+		out.AttachHistory()
+	}
+	return out, nil
 }
 
 // Bus exposes the event bus for subscriptions.
@@ -225,6 +234,11 @@ func (b *Batur) startAutoSync(ctx context.Context) {
 func (b *Batur) Stop(ctx context.Context) error {
 	if b.syncSub != nil {
 		b.syncSub.Unsubscribe()
+	}
+	for _, sub := range b.histSubs {
+		if sub != nil {
+			sub.Unsubscribe()
+		}
 	}
 	err := b.sup.Stop(ctx)
 	if b.owns {

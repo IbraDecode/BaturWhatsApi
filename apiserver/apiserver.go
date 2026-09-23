@@ -60,6 +60,7 @@ func New(s *Server) (*Server, error) {
 	mux.HandleFunc("POST /v1/sessions/{id}/sync", s.hSessionSync)
 	mux.HandleFunc("GET /v1/sessions/{id}/contacts", s.hSessionContacts)
 	mux.HandleFunc("GET /v1/sessions/{id}/chats", s.hSessionChats)
+	mux.HandleFunc("GET /v1/sessions/{id}/history", s.hSessionHistory)
 	s.srv = &http.Server{
 		Addr:         s.Bind,
 		Handler:      s.auth(mux),
@@ -272,6 +273,32 @@ func (s *Server) hSessionChats(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"chats": list})
+}
+
+// hSessionHistory serves bounded message history: ?chat=JID&limit=N
+// without a chat param it returns the chat index.
+func (s *Server) hSessionHistory(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	chat := r.URL.Query().Get("chat")
+	limit := 50
+	if v := r.URL.Query().Get("limit"); v != "" {
+		fmt.Sscanf(v, "%d", &limit)
+	}
+	if chat == "" {
+		chats, err := s.Batur.RecentChats(r.Context(), id)
+		if err != nil {
+			writeErr(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"chats": chats})
+		return
+	}
+	list, err := s.Batur.History(r.Context(), id, chat, limit)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"chat": chat, "messages": list})
 }
 
 // hEvents streams engine events as Server-Sent Events.

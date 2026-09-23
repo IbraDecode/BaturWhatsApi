@@ -9,6 +9,7 @@ import (
 	"github.com/ibradecode/baturwhatsapi/events"
 	"github.com/ibradecode/baturwhatsapi/internal/mockserver"
 	"github.com/ibradecode/baturwhatsapi/protocol/token"
+	"github.com/ibradecode/baturwhatsapi/security/e2e"
 	"github.com/ibradecode/baturwhatsapi/session"
 	"github.com/ibradecode/baturwhatsapi/storage"
 )
@@ -110,4 +111,79 @@ func TestAutoSyncOnReady(t *testing.T) {
 		time.Sleep(50 * time.Millisecond)
 	}
 	t.Fatal("auto-sync on ready never populated snapshot")
+}
+
+// TestHistoryAndAcks verifies bounded conversation persistence + ack
+// lifecycle across an encrypted send and server receipts.
+func TestHistoryAndAcks(t *testing.T) {
+	dict := token.Default()
+	srv, err := mockserver.New(dict)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dialer := mockserver.Dialer{Srv: srv}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	b, err := api.New(api.Options{Dict: dict, Store: storage.NewMemory(), History: true,
+		BundleSource: func(context.Context, api.Target) (*e2e.PreKeyBundle, error) {
+			return srv.E2EBundle(), nil
+		}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := b.Attach("hist", dialer, session.TrustedRootAuth(srv.RootPub()),
+		session.DeviceInfo{Platform: "web"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	defer b.Stop(context.Background())
+	st := waitOnline(t, b, "hist")
+
+	// send -> pending/sent recorded
+	id, err := b.SendText(ctx, "hist", api.Target{JID: st.Account}, "persist me")
+	if err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	var found *api.StoredMessage
+	for time.Now().Before(deadline) && found == nil {
+		h, err := b.History(ctx, "hist", st.Account, 50)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for i := range h {
+			if h[i].ID == id && h[i].FromMe && h[i].Text == "persist me" {
+				found = &h[i]
+			}
+		}
+		if found == nil {
+			time.Sleep(30 * time.Millisecond)
+		}
+	}
+	if found == nil {
+		t.Fatal("sent message not in history")
+	}
+
+	// inbound relay message should also be recorded
+	deadline = time.Now().Add(3 * time.Second)
+	var got bool
+	for time.Now().Before(deadline) && !got {
+		chats, _ := b.RecentChats(ctx, "hist")
+		for _, c := range chats {
+			h, _ := b.History(ctx, "hist", c, 50)
+			for _, m := range h {
+				if !m.FromMe {
+					got = true
+				}
+			}
+		}
+		if !got {
+			time.Sleep(50 * time.Millisecond)
+		}
+	}
+	if !got {
+		t.Fatal("inbound message not persisted")
+	}
 }

@@ -78,6 +78,36 @@ func usage() {
 	fmt.Fprintf(os.Stderr, "usage: batur <version|doctor|bench|demo|serve [--bind addr] [--mock]>\n")
 }
 
+// applyLogOpts reconfigures the global slog default with the chosen
+// level and format. Called from serve() before any logger is in use.
+func applyLogOpts(level, format string) error {
+	var lvl slog.Level
+	switch strings.ToLower(level) {
+	case "debug":
+		lvl = slog.LevelDebug
+	case "", "info":
+		lvl = slog.LevelInfo
+	case "warn", "warning":
+		lvl = slog.LevelWarn
+	case "error":
+		lvl = slog.LevelError
+	default:
+		return fmt.Errorf("invalid --log-level %q (debug|info|warn|error)", level)
+	}
+	opts := &slog.HandlerOptions{Level: lvl}
+	var h slog.Handler
+	switch strings.ToLower(format) {
+	case "", "text":
+		h = slog.NewTextHandler(os.Stderr, opts)
+	case "json":
+		h = slog.NewJSONHandler(os.Stderr, opts)
+	default:
+		return fmt.Errorf("invalid --log-format %q (text|json)", format)
+	}
+	slog.SetDefault(slog.New(h))
+	return nil
+}
+
 func doctor() error {
 	fs := flag.NewFlagSet("doctor", flag.ExitOnError)
 	asJSON := fs.Bool("json", false, "emit a single JSON document instead of human-readable lines")
@@ -182,6 +212,9 @@ func doctor() error {
 }
 
 func bench() error {
+	fs := flag.NewFlagSet("bench", flag.ExitOnError)
+	asJSON := fs.Bool("json", false, "emit a single JSON document instead of human-readable lines")
+	_ = fs.Parse(os.Args[2:])
 	dict := token.Default()
 	node := binary.Node{Tag: "message", Attrs: binary.Attrs{
 		"from": "628123456789@s.whatsapp.net", "id": hexID(), "type": "text",
@@ -202,10 +235,6 @@ func bench() error {
 		}
 	}
 	dec := time.Since(start)
-	fmt.Printf("node encode: %d ops in %v (%.0f ops/s)\n", n, enc.Round(time.Millisecond), float64(n)/enc.Seconds())
-	fmt.Printf("node decode: %d ops in %v (%.0f ops/s)\n", n, dec.Round(time.Millisecond), float64(n)/dec.Seconds())
-
-	// noise handshake cost (client+server)
 	start = time.Now()
 	const hn = 5000
 	for i := 0; i < hn; i++ {
@@ -213,7 +242,39 @@ func bench() error {
 			return err
 		}
 	}
-	fmt.Printf("x25519 keygen: %d in %v (%.0f/s)\n", hn, time.Since(start).Round(time.Millisecond), float64(hn)*float64(time.Second)/float64(time.Since(start)))
+	keygen := time.Since(start)
+
+	if *asJSON {
+		type benchReport struct {
+			NodeEncodeOps       int     `json:"node_encode_ops"`
+			NodeEncodeNs        int64   `json:"node_encode_ns"`
+			NodeEncodeOpsPerSec float64 `json:"node_encode_ops_per_sec"`
+			NodeDecodeOps       int     `json:"node_decode_ops"`
+			NodeDecodeNs        int64   `json:"node_decode_ns"`
+			NodeDecodeOpsPerSec float64 `json:"node_decode_ops_per_sec"`
+			X25519KeygenOps     int     `json:"x25519_keygen_ops"`
+			X25519KeygenNs      int64   `json:"x25519_keygen_ns"`
+			X25519OpsPerSec     float64 `json:"x25519_ops_per_sec"`
+		}
+		rep := benchReport{
+			NodeEncodeOps:       n,
+			NodeEncodeNs:        enc.Nanoseconds(),
+			NodeEncodeOpsPerSec: float64(n) / enc.Seconds(),
+			NodeDecodeOps:       n,
+			NodeDecodeNs:        dec.Nanoseconds(),
+			NodeDecodeOpsPerSec: float64(n) / dec.Seconds(),
+			X25519KeygenOps:     hn,
+			X25519KeygenNs:      keygen.Nanoseconds(),
+			X25519OpsPerSec:     float64(hn) / keygen.Seconds(),
+		}
+		enc2 := json.NewEncoder(os.Stdout)
+		enc2.SetEscapeHTML(false)
+		return enc2.Encode(rep)
+	}
+
+	fmt.Printf("node encode: %d ops in %v (%.0f ops/s)\n", n, enc.Round(time.Millisecond), float64(n)/enc.Seconds())
+	fmt.Printf("node decode: %d ops in %v (%.0f ops/s)\n", n, dec.Round(time.Millisecond), float64(n)/dec.Seconds())
+	fmt.Printf("x25519 keygen: %d in %v (%.0f/s)\n", hn, keygen.Round(time.Millisecond), float64(hn)/keygen.Seconds())
 	return nil
 }
 
@@ -277,7 +338,12 @@ func serve() error {
 	history := fs.Bool("history", true, "persist bounded per-chat message history")
 	sync := fs.Bool("sync", false, "auto-sync contacts/chats on session ready")
 	mediaDemo := fs.Bool("media-demo", false, "with --mock: additionally push an <image/> message right after connect")
+	logLevel := fs.String("log-level", "info", "log level: debug|info|warn|error")
+	logFormat := fs.String("log-format", "text", "log format: text|json")
 	_ = fs.Parse(os.Args[2:])
+	if err := applyLogOpts(*logLevel, *logFormat); err != nil {
+		return err
+	}
 
 	dict := token.Default()
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

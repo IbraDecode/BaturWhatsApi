@@ -49,6 +49,8 @@ go run ./cmd/batur doctor            # runtime + crypto + engine + e2e self-chec
 go run ./cmd/batur doctor --json      # machine-readable single JSON object
 go run ./cmd/batur serve --mock --bind 127.0.0.1:8080   # REST + SSE API
 go run ./cmd/batur serve --mock --media-demo             # additionally pushes an image message
+go run ./cmd/batur serve --log-format json               # structured logs for log aggregators
+go run ./cmd/batur bench --json                          # machine-readable benchmark numbers
 ```
 
 ## Embedding (library mode)

@@ -135,6 +135,7 @@ go     run ./examples/sdk/go
 - `docs/BENCH.md` — reproducible `batur bench` numbers & caveats
 - `docs/TROUBLESHOOTING.md` — operator field guide for common pitfalls
 - `docs/decisions/ADR-0007-storage-adapters-sibling-module.md` — T-204 design
+- `storage-adapters/` — optional sibling module (Postgres / SQLite stubs; see ADR-0007)
 - `docs/architecture/ARCHITECTURE.md` — layering & data paths
 - `docs/decisions/` — ADRs (language, deps, concurrency, storage, auth)
 - `CONTRIBUTING.md` — invariants, local loop, contribution rules

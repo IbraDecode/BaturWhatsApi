@@ -28,7 +28,7 @@ Status: TODO / IN_PROGRESS / BLOCKED / DONE.
 
 | # | Task | Status |
 |---|------|--------|
-| T-201 | Media engine: download/upload pipeline (encrypt/decrypt, refs) | TODO |
+| T-201 | Media engine: download/upload pipeline (encrypt/decrypt, refs) | IN_PROGRESS | Attachment envelope parsing (api.Media: image/video/audio/document/location/contact/sticker/app via legacy-XML child tags) + history `media` field + mock image demo, all -race green; upload/download + protobuf descriptor mapping pending (needs live capture) |
 | T-202 | REST + WebSocket API servers over core (core stays REST-free) | IN_PROGRESS | v1 REST+SSE+WS bridge live (apiserver/); device pairing/registration endpoints pending |
 | T-203 | SDKs: Python + TypeScript thin clients over API | DONE | Python (REST+SSE+WS RFC6455 stdlib), Node (fetch+global WebSocket), TypeScript (types, runs on Node22 type-stripping); all verified live vs serve --mock |
 | T-204 | Postgres/SQLite storage adapters (multi-node) | TODO |

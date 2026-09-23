@@ -20,9 +20,15 @@ Honest register. Anything production-relevant lives here until fixed.
 4. **File store crash-consistency is per-file atomic, not fsync'd to
    disk.** Power loss may lose the newest write; no torn-state corruption
    expected. (T-004.)
-5. **WebSocket client is client-role only** (WhatsApp edge). The bundled
-   `transport/ws` test-server exists solely for loopback tests/demo —
-   do not expose it as a service.
+5. **WebSocket server mode serves `/v1/ws` behind bearer auth** (RFC6455
+   handshake + unmasked server frames). The raw `ServeWS` loopback helper
+   remains test-only; production deployments should terminate TLS/WSS at
+   a reverse proxy (see docs/deploy/DEPLOY.md).
+6. **Media metadata (T-201) parses the legacy-XML child-tag scheme
+   (image/video/audio/document/...) and is verified only against the mock
+   server.** Live-device WhatsApp messages carry protobuf descriptors
+   (WebMessageInfo etc.); mapping those is pending a real capture and may
+   differ. Upload/download pipelines are not implemented yet.
 6. **Idle-memory claims are unmeasured.** "Low-memory" is a design goal
    (no V8/CGO, slice pools planned), not a benchmarked fact (T-002).
 7. **Dictionary revision is v3 (DictVersion=3)** extracted from

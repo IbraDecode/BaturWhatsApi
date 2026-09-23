@@ -44,6 +44,21 @@ type Target struct {
 	JID string // canonical string form, e.g. "628123@s.whatsapp.net"
 }
 
+// Media carries metadata for non-text message attachments. Parse rules use
+// the legacy XML child-tag scheme (verified against the mock server); the
+// protobuf descriptor mapping for live devices is an open item (T-201).
+type Media struct {
+	Kind    string // image|video|audio|document|location|contact|sticker|app
+	URL     string
+	MIME    string
+	Caption string
+	Width   string
+	Height  string
+	Name    string // document file name
+	Size    string // document size (as transmitted)
+	Thumb   string // jpeg thumbnail (data: URI on the wire, if any)
+}
+
 // Message is the public domain model for a message (v0.1: metadata + text;
 // encrypted payloads arrive with the Signal engine in Phase 2).
 type Message struct {
@@ -54,6 +69,7 @@ type Message struct {
 	Type     string
 	Stamp    time.Time
 	FromMe   bool
+	Media    *Media
 	RawAttrs map[string]string
 }
 
@@ -319,6 +335,36 @@ func toMessage(n binary.Node, sessID string) Message {
 		m.Text, _ = child.TextContent()
 	} else if txt, ok := n.TextContent(); ok {
 		m.Text = txt
+	}
+	for _, tag := range []string{"image", "video", "audio", "document", "location", "contact", "sticker", "app"} {
+		child, found := n.ChildByTag(tag)
+		if !found {
+			continue
+		}
+		media := Media{Kind: tag}
+		media.URL, _ = child.StringAttr("url")
+		media.MIME, _ = child.StringAttr("mimetype")
+		if media.MIME == "" {
+			media.MIME, _ = child.StringAttr("mime")
+		}
+		if media.MIME == "" {
+			media.MIME, _ = child.StringAttr("media")
+		}
+		media.Caption, _ = child.StringAttr("caption")
+		media.Width, _ = child.StringAttr("width")
+		media.Height, _ = child.StringAttr("height")
+		media.Name, _ = child.StringAttr("name")
+		media.Size, _ = child.StringAttr("file-length")
+		media.Thumb, _ = child.StringAttr("jpegThumbnail")
+		if tag == "location" {
+			if lat, ok := child.StringAttr("latitude"); ok {
+				if lon, ok2 := child.StringAttr("longitude"); ok2 {
+					media.URL = lat + "," + lon
+				}
+			}
+		}
+		m.Media = &media
+		break
 	}
 	m.RawAttrs = map[string]string{}
 	for k := range n.Attrs {

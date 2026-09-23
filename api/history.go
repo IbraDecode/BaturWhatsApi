@@ -37,6 +37,7 @@ type StoredMessage struct {
 	FromMe    bool     `json:"from_me"`
 	Ack       AckState `json:"ack"`
 	Timestamp int64    `json:"ts"`
+	Media     *Media   `json:"media,omitempty"`
 }
 
 // HistoryWindow is the per-chat ring size kept in storage.
@@ -74,20 +75,22 @@ func (h *HistoryStore) onInbound(_ context.Context, ev events.Event) {
 	if !ok {
 		return
 	}
-	id, _ := node.StringAttr("id")
-	if id == "" {
+	msg := toMessage(node, ev.Session)
+	if msg.ID == "" {
 		return
 	}
-	chat := node.MustStringAttr("from")
-	text := ""
-	if c, ok := node.ChildByTag("plain"); ok {
-		text, _ = c.TextContent()
+	sm := StoredMessage{
+		ID: msg.ID, Chat: msg.Chat.JID, Text: msg.Text,
+		Type: msg.Type, Ack: AckReceived, Timestamp: msgTS(node),
 	}
-	h.upsert(ev.Session, StoredMessage{
-		ID: id, Chat: chat, Sender: node.MustStringAttr("participant"),
-		Text: text, Type: node.MustStringAttr("type"), Ack: AckReceived,
-		Timestamp: msgTS(node),
-	})
+	if msg.Sender.JID != "" {
+		sm.Sender = msg.Sender.JID
+	}
+	if msg.Media != nil {
+		md := *msg.Media
+		sm.Media = &md
+	}
+	h.upsert(ev.Session, sm)
 }
 
 func (h *HistoryStore) onSent(_ context.Context, ev events.Event) {

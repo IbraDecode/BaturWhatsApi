@@ -46,6 +46,10 @@ type Server struct {
 	dropAfterRequests int
 	// IgnoreAcks disables ping replies (network-stall simulation).
 	IgnoreAcks bool
+	// MediaDemo additionally pushes a media (image) message shortly after
+	// connect, used to exercise attachment parsing end to end. Default
+	// off so message-count-sensitive tests stay stable.
+	MediaDemo bool
 }
 
 // Registration is what the mock "accounts DB" remembers per device.
@@ -360,6 +364,16 @@ func (s *Server) sessionLoop(ctx context.Context, ds *deviceSession) error {
 	go func() {
 		time.Sleep(50 * time.Millisecond)
 		s.pushMessage(ctx, ds, "Hello from Batur mock server")
+		if s.MediaDemo {
+			time.Sleep(50 * time.Millisecond)
+			s.pushMediaMessage(ctx, ds, "image", binary.Attrs{
+				"url":      "https://mock.local/media/batur-demo.jpg",
+				"mimetype": "image/jpeg",
+				"caption":  "Batur demo snapshot",
+				"width":    "640",
+				"height":   "480",
+			})
+		}
 	}()
 	for {
 		raw, err := recvTimeout(ctx, conn, 0)
@@ -446,6 +460,22 @@ func (s *Server) pushMessage(ctx context.Context, ds *deviceSession, text string
 			"type": "text",
 		},
 		Content: []binary.Node{{Tag: "plain", Content: text}},
+	}
+	s.push(ctx, ds, msg)
+}
+
+// pushMediaMessage sends a legacy-XML media message (e.g. <image/> with url,
+// mime, caption, size attrs — the same child-tag scheme <plain> uses for
+// text in the mock wire format).
+func (s *Server) pushMediaMessage(ctx context.Context, ds *deviceSession, kind string, attrs binary.Attrs) {
+	msg := binary.Node{
+		Tag: "message",
+		Attrs: binary.Attrs{
+			"from": ds.reg.AccountJID,
+			"id":   fmt.Sprintf("MOCK%06d", time.Now().UnixNano()%1000000),
+			"type": kind,
+		},
+		Content: []binary.Node{{Tag: kind, Attrs: attrs}},
 	}
 	s.push(ctx, ds, msg)
 }

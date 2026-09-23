@@ -65,7 +65,8 @@ func New(dict *token.Dictionary) (*Server, error) {
 }
 
 // SetDropAfterRequests makes the server sever the connection after every
-// N-th IQ response for a device (<=0 disables). For chaos/recovery tests.
+// N-th incoming node from a device (<=0 disables). For chaos/recovery
+// tests (drop counts any node: IQ, ping, …).
 func (s *Server) SetDropAfterRequests(n int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -217,6 +218,14 @@ func (s *Server) sessionLoop(ctx context.Context, ds *deviceSession) error {
 }
 
 func (s *Server) handle(ctx context.Context, ds *deviceSession, n binary.Node) bool {
+	ds.mu.Lock()
+	ds.reqCount++
+	drop := s.dropAfterRequests > 0 && ds.reqCount%s.dropAfterRequests == 0
+	ds.mu.Unlock()
+	if drop && n.Tag != "xmlstreamend" {
+		ds.conn.Close()
+		return true
+	}
 	conn, send := ds.conn, ds.send
 	switch n.Tag {
 	case "xmlstreamend":
@@ -233,14 +242,7 @@ func (s *Server) handle(ctx context.Context, ds *deviceSession, n binary.Node) b
 	case "iq":
 		id, _ := n.StringAttr("id")
 		typ, _ := n.StringAttr("type")
-		ds.mu.Lock()
-		ds.reqCount++
-		drop := s.dropAfterRequests > 0 && ds.reqCount%s.dropAfterRequests == 0
-		ds.mu.Unlock()
 		switch {
-		case drop:
-			conn.Close()
-			return true
 		case typ == "get" && n.MustStringAttr("xmlns") == "batur.demo":
 			var echo []binary.Node
 			for _, c := range n.Children() {

@@ -7,10 +7,10 @@ import "github.com/ibradecode/baturwhatsapi/protocol/pb"
 
 // HandshakeMessage field numbers (per WhatsApp web protocol).
 const (
-	HSFieldClientHello   = 1
-	HSFieldServerHello   = 2
-	HSFieldClientFinish  = 3
-	HSFieldSubConnHello  = 4
+	HSFieldClientHello  = 1
+	HSFieldServerHello  = 2
+	HSFieldClientFinish = 3
+	HSFieldSubConnHello = 4
 )
 
 // Hello sub-message field numbers.

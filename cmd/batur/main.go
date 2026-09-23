@@ -424,7 +424,8 @@ func serve() error {
 	if err != nil {
 		return err
 	}
-	slog.Info("HTTP API listening", "bind", *bind, "auth", os.Getenv("BATUR_API_TOKEN") != "")
+	slog.Info("HTTP API listening", "bind", *bind, "auth", os.Getenv("BATUR_API_TOKEN") != "",
+		"history", *history, "sync", *sync, "max_body_bytes", *maxBody)
 	go func() {
 		if err := apiSrv.ListenAndServe(ctx); err != nil {
 			slog.Error("http server", "err", err)

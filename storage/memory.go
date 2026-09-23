@@ -33,6 +33,9 @@ type Memory struct {
 	data map[string][]byte
 }
 
+// Compile-time conformance guard for ADR-0007 storage adapters.
+var _ KV = (*Memory)(nil)
+
 // NewMemory creates an empty in-memory store.
 func NewMemory() *Memory {
 	return &Memory{data: map[string][]byte{}}

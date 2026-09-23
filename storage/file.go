@@ -22,6 +22,9 @@ type FileStore struct {
 	manifest map[string]string // logical key -> filename
 }
 
+// Compile-time conformance guard for ADR-0007 storage adapters.
+var _ KV = (*FileStore)(nil)
+
 // NewFileStore opens (creating if needed) a directory-backed store.
 func NewFileStore(dir string) (*FileStore, error) {
 	if dir == "" {

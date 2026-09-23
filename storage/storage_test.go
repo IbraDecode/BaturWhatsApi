@@ -108,3 +108,15 @@ func TestFileEscapeSafety(t *testing.T) {
 		}
 	}
 }
+
+func TestSecureKV(t *testing.T) {
+	key := make([]byte, 32)
+	for i := range key {
+		key[i] = byte(i)
+	}
+	s, err := NewSecureKV(NewMemory(), key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	testKV(t, s)
+}

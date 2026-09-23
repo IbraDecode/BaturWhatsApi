@@ -11,6 +11,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -78,21 +79,46 @@ func usage() {
 }
 
 func doctor() error {
-	fmt.Printf("go:        %s (%s/%s)\n", runtime.Version(), runtime.GOOS, runtime.GOARCH)
-	fmt.Printf("cpus:      %d\n", runtime.NumCPU())
-	fmt.Printf("goroutines: %d\n", runtime.NumGoroutine())
+	fs := flag.NewFlagSet("doctor", flag.ExitOnError)
+	asJSON := fs.Bool("json", false, "emit a single JSON document instead of human-readable lines")
+	_ = fs.Parse(os.Args[2:])
+	type doctorReport struct {
+		Go             string `json:"go"`
+		GOOS           string `json:"goos"`
+		GOARCH         string `json:"goarch"`
+		CPUs           int    `json:"cpus"`
+		Goroutines     int    `json:"goroutines"`
+		TokenDict      string `json:"token_dict"`
+		X25519KeygenNs int64  `json:"x25519_keygen_ns"`
+		CodecWarmNs    int64  `json:"codec_warm_ns"`
+		CodecWarmBytes int    `json:"codec_warm_bytes"`
+		CodecWarmErr   string `json:"codec_warm_err,omitempty"`
+		EngineOnlineNs int64  `json:"engine_online_ns,omitempty"`
+		E2ESelfCheckNs int64  `json:"e2e_selfcheck_ns,omitempty"`
+	}
+	rep := doctorReport{
+		Go:         runtime.Version(),
+		GOOS:       runtime.GOOS,
+		GOARCH:     runtime.GOARCH,
+		CPUs:       runtime.NumCPU(),
+		Goroutines: runtime.NumGoroutine(),
+	}
 	dict := token.Default()
-	fmt.Printf("token dict: %s\n", dict)
+	rep.TokenDict = dict.String()
 	start := time.Now()
 	if _, err := noise.NewKeyPair(); err != nil {
 		return err
 	}
-	fmt.Printf("x25519 keygen: %v\n", time.Since(start).Round(time.Microsecond))
+	rep.X25519KeygenNs = time.Since(start).Nanoseconds()
 	start = time.Now()
 	node := binary.Node{Tag: "iq", Attrs: binary.Attrs{"id": hexID(), "type": "set"}}
 	raw := binary.MarshalDict(node, dict)
 	_, err := binary.Decode(dict, raw)
-	fmt.Printf("codec warm: %v (%d bytes) err=%v\n", time.Since(start).Round(time.Microsecond), len(raw), err)
+	rep.CodecWarmNs = time.Since(start).Nanoseconds()
+	rep.CodecWarmBytes = len(raw)
+	if err != nil {
+		rep.CodecWarmErr = err.Error()
+	}
 	start = time.Now()
 	srv, err := mockserver.New(dict)
 	if err != nil {
@@ -110,11 +136,10 @@ func doctor() error {
 	if err := s.Start(ctx); err != nil {
 		return fmt.Errorf("engine self-check connect: %w", err)
 	}
-	fmt.Printf("engine self-check: ONLINE in %v\n", time.Since(start).Round(time.Millisecond))
+	rep.EngineOnlineNs = time.Since(start).Nanoseconds()
 	if err := s.Stop(ctx); err != nil {
 		return err
 	}
-	// e2e mini-exchange self check
 	start = time.Now()
 	bk, bundle, err := e2e.NewBobKeys()
 	if err != nil {
@@ -136,7 +161,23 @@ func doctor() error {
 	if err != nil || string(plain) != "doctor" {
 		return fmt.Errorf("e2e self-check failed: %v", err)
 	}
-	fmt.Printf("e2e self-check: X3DH+DR handshake ok in %v\n", time.Since(start).Round(time.Millisecond))
+	rep.E2ESelfCheckNs = time.Since(start).Nanoseconds()
+
+	if *asJSON {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetEscapeHTML(false)
+		return enc.Encode(rep)
+	}
+	fmt.Printf("go:        %s (%s/%s)\n", rep.Go, rep.GOOS, rep.GOARCH)
+	fmt.Printf("cpus:      %d\n", rep.CPUs)
+	fmt.Printf("goroutines: %d\n", rep.Goroutines)
+	fmt.Printf("token dict: %s\n", rep.TokenDict)
+	fmt.Printf("x25519 keygen: %v\n", time.Duration(rep.X25519KeygenNs).Round(time.Microsecond))
+	fmt.Printf("codec warm: %v (%d bytes) err=%v\n",
+		time.Duration(rep.CodecWarmNs).Round(time.Microsecond), rep.CodecWarmBytes, err)
+	fmt.Printf("engine self-check: ONLINE in %v\n", time.Duration(rep.EngineOnlineNs).Round(time.Millisecond))
+	fmt.Printf("e2e self-check: X3DH+DR handshake ok in %v\n",
+		time.Duration(rep.E2ESelfCheckNs).Round(time.Millisecond))
 	return nil
 }
 

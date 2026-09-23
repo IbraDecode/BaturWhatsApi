@@ -1,8 +1,9 @@
 GO      ?= go
 BIN     := bin
 LDFLAGS := -s -w
+FUZZTIME ?= 5s
 
-.PHONY: all build test race vet fmt fmt-check bench demo doctor clean lint cross
+.PHONY: all build test race vet fmt fmt-check bench demo doctor fuzz clean lint cross
 
 all: vet test build
 
@@ -34,6 +35,11 @@ demo:
 
 doctor:
 	$(GO) run ./cmd/batur doctor
+
+fuzz:
+	$(GO) test -run '^$$' -fuzz=FuzzDecodeDefault -fuzztime=$(FUZZTIME) ./protocol/binary/
+	$(GO) test -run '^$$' -fuzz=FuzzEncodeNode   -fuzztime=$(FUZZTIME) ./protocol/binary/
+	$(GO) test -run '^$$' -fuzz=FuzzParse        -fuzztime=$(FUZZTIME) ./protocol/pb/
 
 cross:
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 $(GO) build -trimpath -ldflags '$(LDFLAGS)' -o $(BIN)/batur-linux-amd64 ./cmd/batur

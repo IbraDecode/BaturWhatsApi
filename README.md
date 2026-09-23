@@ -136,6 +136,7 @@ go     run ./examples/sdk/go
 - `docs/decisions/ADR-0007-storage-adapters-sibling-module.md` — T-204 design
 - `docs/architecture/ARCHITECTURE.md` — layering & data paths
 - `docs/decisions/` — ADRs (language, deps, concurrency, storage, auth)
+- `CONTRIBUTING.md` — invariants, local loop, contribution rules
 - `docs/RESEARCH.md` — protocol research log (no copied code)
 - `docs/KNOWN_ISSUES.md` — limitations register
 - `docs/TASKS.md` — prioritized backlog

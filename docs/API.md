@@ -134,5 +134,9 @@ node   batur_client.ts  ws --subscribe mock-1        # Node type-stripping
 
 ## Error handling
 
-Errors return `{"error": "..."}` with a 4xx/5xx status. WS command errors
-come as `{"type":"result","op":"<op>","ok":false,"error":"..."}`.
+Errors return `{"error": "...", "code": "..."}` with a 4xx/5xx status.
+`code` is a stable, programmatic-friendly token (e.g. `not_found`,
+`unauthorized`, `body_too_large`, `bad_request`, `internal`); clients
+should switch on it instead of parsing the English message.
+
+WS command errors come as `{"type":"result","op":"<op>","ok":false,"error":"..."}`.

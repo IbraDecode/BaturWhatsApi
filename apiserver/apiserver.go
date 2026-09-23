@@ -31,11 +31,11 @@ var ErrNoToken = errors.New("apiserver: BATUR_API_TOKEN required for non-local b
 // Server wraps an api.Batur instance with HTTP endpoints.
 type Server struct {
 	Batur        *api.Batur
-	Bind       string // ":8080" etc
-	Token      string // bearer token; empty = require localhost bind
-	EventQueue int    // per-subscriber queue (default 256)
-	MaxBodyBytes int64 // cap POST request body size; 0 = default 1 MiB
-	ReadTimeout time.Duration // HTTP ReadTimeout; 0 = default 15s
+	Bind         string        // ":8080" etc
+	Token        string        // bearer token; empty = require localhost bind
+	EventQueue   int           // per-subscriber queue (default 256)
+	MaxBodyBytes int64         // cap POST request body size; 0 = default 1 MiB
+	ReadTimeout  time.Duration // HTTP ReadTimeout; 0 = default 15s
 
 	srv     *http.Server
 	testURL string // set by tests when routed through httptest
@@ -165,7 +165,53 @@ func writeJSON(w http.ResponseWriter, code int, v any) {
 }
 
 func writeErr(w http.ResponseWriter, code int, msg string) {
-	writeJSON(w, code, map[string]string{"error": msg})
+	writeJSON(w, code, map[string]any{
+		"error": msg,
+		"code":  httpCodeName(code),
+	})
+}
+
+// httpCodeName returns a stable, programmatic-friendly token for an
+// HTTP status (e.g. "not_found", "unauthorized", "bad_request"). Stable
+// across versions so clients can switch on it instead of parsing the
+// English message.
+func httpCodeName(code int) string {
+	switch code {
+	case 400:
+		return "bad_request"
+	case 401:
+		return "unauthorized"
+	case 403:
+		return "forbidden"
+	case 404:
+		return "not_found"
+	case 405:
+		return "method_not_allowed"
+	case 408:
+		return "request_timeout"
+	case 413:
+		return "body_too_large"
+	case 415:
+		return "unsupported_media_type"
+	case 429:
+		return "too_many_requests"
+	case 500:
+		return "internal"
+	case 502:
+		return "bad_gateway"
+	case 503:
+		return "unavailable"
+	case 504:
+		return "gateway_timeout"
+	default:
+		if code >= 400 && code < 500 {
+			return "client_error"
+		}
+		if code >= 500 {
+			return "server_error"
+		}
+		return "ok"
+	}
 }
 
 func (s *Server) hHealth(w http.ResponseWriter, r *http.Request) {

@@ -18,6 +18,9 @@ import (
 // wsConnections is the live WebSocket subscriber gauge (rendered in /metrics).
 var wsConnections atomic.Int64
 
+// wsPingsTotal counts keepalive pings sent by the WS bridge.
+var wsPingsTotal atomic.Uint64
+
 // wsCommand is a client -> server command frame (JSON text).
 type wsCommand struct {
 	Op      string `json:"op"` // ping|send|sync|subscribe|unsubscribe
@@ -167,6 +170,7 @@ func (b *wsEventBridge) stream() {
 		case <-b.close:
 			return
 		case <-ticker.C:
+			wsPingsTotal.Add(1)
 			_ = b.conn.SendPing(context.Background(), nil)
 		case ev := <-ch:
 			if !b.wants(ev) {

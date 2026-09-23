@@ -79,6 +79,10 @@ func (s *Server) hMetrics(w http.ResponseWriter, r *http.Request) {
 	sb.WriteString("# TYPE batur_ws_connections gauge\n")
 	fmt.Fprintf(&sb, "batur_ws_connections %d\n", wsConnections.Load())
 
+	sb.WriteString("# HELP batur_ws_pings_total Keepalive pings sent by the WS bridge.\n")
+	sb.WriteString("# TYPE batur_ws_pings_total counter\n")
+	fmt.Fprintf(&sb, "batur_ws_pings_total %d\n", wsPingsTotal.Load())
+
 	// event bus stats
 	if b := s.Batur.Bus(); b != nil {
 		bs := b.Stats()

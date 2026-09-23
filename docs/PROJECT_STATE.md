@@ -34,7 +34,7 @@ itself 24/7 (supervisor + automatic recovery).
 | Observability        | 🟡     | bus stats, health snapshots, structured logs; metrics endpoints not wired |
 | REST/WS API server   | ❌     | planned (public HTTP/WebSocket wrapper over core; core must stay REST-free) |
 | Testing              | ✅     | 12/12 packages green incl. stress + chaos tests; `-race` full suite CLEAN |
-| Benchmarks           | 🟡     | codec/keygen micro-bench via `batur bench`; session-scale load test pending |
+| Benchmarks           | ✅     | `internal/bench`: 100 idle sessions = 119.8 KiB heap/session, ~5 goroutines/session, 52.7K encrypted IQ round-trips/s single session (19µs/op); node codec 2.2µs enc / 3.2µs dec; race + stress green |
 | CI/CD                | ✅     | GitHub Actions: build, vet, fuzz-smoke tests, race, cross-compile |
 | Deployment           | 🟡     | single-binary model; Dockerfile pending |
 | Security audit       | 🟡     | in progress (see KNOWN_ISSUES) |

@@ -24,7 +24,7 @@ POST /v1/sessions/{id}/text         send text ({"to": jid, "text": "..."})
 POST /v1/sessions/{id}/sync         resumable contacts/chats sync
 GET  /v1/sessions/{id}/contacts     synced contacts snapshot
 GET  /v1/sessions/{id}/chats        synced chats snapshot
-GET  /v1/sessions/{id}/history      per-chat history (?chat=jid&limit=n)
+GET  /v1/sessions/{id}/history      per-chat history (?chat=jid&limit=n&cursor=o)
 GET  /v1/events                     Server-Sent Events (all types)
 GET  /v1/ws                         WebSocket event bridge (see below)
 GET  /metrics                       Prometheus text endpoint (+ ws gauge)
@@ -33,12 +33,14 @@ GET  /metrics                       Prometheus text endpoint (+ ws gauge)
 ### History / media
 
 `GET /v1/sessions/{id}/history?chat=62000001001@s.whatsapp.net&limit=100`
-returns bounded per-chat entries:
+returns bounded per-chat entries. Pass `cursor=N` to page forward (offset
+into the chat's ring); the response carries `next_cursor` (or `-1` when
+there is no more):
 
 ```json
 {
   "chat": "62000001001@s.whatsapp.net",
-  "entries": [
+  "messages": [
     {
       "id": "MOCK123456",
       "chat": "62000001001@s.whatsapp.net",
@@ -57,7 +59,8 @@ returns bounded per-chat entries:
         "Height": "480"
       }
     }
-  ]
+  ],
+  "next_cursor": -1
 }
 ```
 

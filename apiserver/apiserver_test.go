@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -841,5 +842,128 @@ func TestWSBridgeTokenAuth(t *testing.T) {
 	}
 	if !bytes.Contains(raw, []byte(`"hello"`)) {
 		t.Fatalf("no hello after authed upgrade: %s", raw)
+	}
+}
+
+func TestHistoryPagination(t *testing.T) {
+	dict := token.Default()
+	srv, err := mockserver.New(dict)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dialer := mockserver.Dialer{Srv: srv}
+	b, err := api.New(api.Options{Dict: dict, History: true,
+		BundleSource: func(context.Context, api.Target) (*e2e.PreKeyBundle, error) {
+			return srv.E2EBundle(), nil
+		}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := b.Attach("page", dialer, session.TrustedRootAuth(srv.RootPub()),
+		session.DeviceInfo{Platform: "web"}); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if err := b.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	defer b.Stop(context.Background())
+	deadline := time.Now().Add(10 * time.Second)
+	var acct string
+	for time.Now().Before(deadline) {
+		if st, err := b.Status("page"); err == nil && st.State == api.StateOnline && st.Account != "" {
+			acct = st.Account
+			break
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	if acct == "" {
+		t.Fatal("never online")
+	}
+	const N = 8
+	for i := 0; i < N; i++ {
+		if _, err := b.SendText(ctx, "page", api.Target{JID: acct}, fmt.Sprintf("msg-%02d", i)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// wait for persistence
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		h, err := b.History(ctx, "page", acct, 64)
+		if err == nil && len(h) >= N {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	s := &Server{Batur: b}
+	s, err = New(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := httptest.NewServer(s.srv.Handler)
+	defer ts.Close()
+
+	get := func(qs string) map[string]any {
+		resp, err := http.Get(ts.URL + "/v1/sessions/page/history?" + qs + "&chat=" + url.QueryEscape(acct))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		b1, _ := io.ReadAll(resp.Body)
+		var out map[string]any
+		if err := json.Unmarshal(b1, &out); err != nil {
+			t.Fatalf("bad json %s: %v", b1, err)
+		}
+		return out
+	}
+	first := get("limit=3")
+	msgs := first["messages"].([]any)
+	if len(msgs) != 3 {
+		t.Fatalf("page1 len = %d want 3", len(msgs))
+	}
+	firstID, _ := msgs[0].(map[string]any)["id"].(string)
+	next, _ := first["next_cursor"].(float64)
+	if int(next) <= 0 {
+		t.Fatalf("next_cursor not set: %v", first["next_cursor"])
+	}
+	second := get(fmt.Sprintf("limit=3&cursor=%d", int(next)))
+	msgs2 := second["messages"].([]any)
+	if len(msgs2) == 0 {
+		t.Fatal("page2 empty")
+	}
+	firstID2, _ := msgs2[0].(map[string]any)["id"].(string)
+	if firstID == firstID2 {
+		t.Fatal("pages overlap")
+	}
+	// Drain everything and confirm full coverage.
+	seen := map[string]bool{firstID: true}
+	for _, m := range msgs {
+		if id, ok := m.(map[string]any)["id"].(string); ok {
+			seen[id] = true
+		}
+	}
+	for _, m := range msgs2 {
+		if id, ok := m.(map[string]any)["id"].(string); ok {
+			seen[id] = true
+		}
+	}
+	c, _ := second["next_cursor"].(float64)
+	for c >= 0 {
+		pg := get(fmt.Sprintf("limit=3&cursor=%d", int(c)))
+		for _, m := range pg["messages"].([]any) {
+			if id, ok := m.(map[string]any)["id"].(string); ok {
+				seen[id] = true
+			}
+		}
+		nc, _ := pg["next_cursor"].(float64)
+		if nc == c {
+			break
+		}
+		c = nc
+	}
+	if len(seen) < N {
+		t.Fatalf("paginated coverage %d < %d", len(seen), N)
 	}
 }

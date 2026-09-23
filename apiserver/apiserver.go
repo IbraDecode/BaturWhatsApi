@@ -313,13 +313,23 @@ func (s *Server) hSessionChats(w http.ResponseWriter, r *http.Request) {
 }
 
 // hSessionHistory serves bounded message history: ?chat=JID&limit=N
-// without a chat param it returns the chat index.
+// &cursor=O without a chat param it returns the chat index. cursor
+// is an offset into the chat's ring buffer (0 = oldest).
 func (s *Server) hSessionHistory(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	chat := r.URL.Query().Get("chat")
 	limit := 50
 	if v := r.URL.Query().Get("limit"); v != "" {
 		fmt.Sscanf(v, "%d", &limit)
+	}
+	if limit < 1 {
+		limit = 1
+	} else if limit > 500 {
+		limit = 500
+	}
+	cursor := 0
+	if v := r.URL.Query().Get("cursor"); v != "" {
+		fmt.Sscanf(v, "%d", &cursor)
 	}
 	if chat == "" {
 		chats, err := s.Batur.RecentChats(r.Context(), id)
@@ -330,12 +340,27 @@ func (s *Server) hSessionHistory(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"chats": chats})
 		return
 	}
-	list, err := s.Batur.History(r.Context(), id, chat, limit)
+	// Fetch the full chat ring (bounded by api.HistoryWindow) so we can
+	// slice by cursor without losing pagination state.
+	list, err := s.Batur.History(r.Context(), id, chat, api.HistoryWindow)
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"chat": chat, "messages": list})
+	if cursor >= len(list) {
+		writeJSON(w, http.StatusOK, map[string]any{"chat": chat, "messages": []any{}, "next_cursor": -1})
+		return
+	}
+	end := cursor + limit
+	if end > len(list) {
+		end = len(list)
+	}
+	page := list[cursor:end]
+	next := -1
+	if end < len(list) {
+		next = end
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"chat": chat, "messages": page, "next_cursor": next})
 }
 
 // hEvents streams engine events as Server-Sent Events.

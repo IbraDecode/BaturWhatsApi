@@ -87,9 +87,32 @@ Authorization: Bearer $BATUR_API_TOKEN   (required for non-local bind)
 ```
 
 Zero-dependency SDK examples that speak the REST + WS API live in
-`examples/sdk/` (`python/batur_client.py`, `node/batur_client.mjs`,
-`go/main.go`); e.g. `python3 batur_client.py --url http://127.0.0.1:8080 ws
---subscribe mock-1` streams live bridge frames.
+`examples/sdk/`. Each ships the same six subcommands:
+
+| subcommand  | what it does                              |
+|-------------|-------------------------------------------|
+| `health`    | GET /v1/health (public)                   |
+| `sessions`  | GET /v1/sessions                          |
+| `get`       | GET /v1/sessions/{id}                     |
+| `text`      | POST /v1/sessions/{id}/text (sid to text) |
+| `events`    | GET /v1/events (SSE, optional seconds)    |
+| `ws`        | GET /v1/ws (live frames, optional seconds; `--subscribe` for session filter; TS/Python only: jid filter on `subscribe`) |
+
+Quickstart (each runnable against `batur serve --mock --media-demo`):
+
+```sh
+# Python (stdlib only, 3.8+)
+python3 examples/sdk/python/batur_client.py --url http://127.0.0.1:8080 ws --seconds 5 --subscribe mock-1
+
+# Node (>= 22 type-stripping; falls back to SSE if global WebSocket is absent)
+node   examples/sdk/node/batur_client.mjs --url http://127.0.0.1:8080 ws --seconds 5 --subscribe mock-1
+
+# TypeScript (Node >= 22 native type-stripping)
+node   examples/sdk/typescript/batur_client.ts --url http://127.0.0.1:8080 ws --seconds 5 --subscribe mock-1
+
+# Go (in-process library demo: two sessions against the mock relay)
+go     run ./examples/sdk/go
+```
 
 ## Production notes (current revision)
 

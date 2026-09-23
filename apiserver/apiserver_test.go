@@ -1021,3 +1021,92 @@ func TestMaxBodyBytes(t *testing.T) {
 		t.Fatalf("status=%d body=%s", resp.StatusCode, b1)
 	}
 }
+
+func TestHistoryOne(t *testing.T) {
+	dict := token.Default()
+	srv, err := mockserver.New(dict)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dialer := mockserver.Dialer{Srv: srv}
+	b, err := api.New(api.Options{Dict: dict, History: true, Store: storage.NewMemory(),
+		BundleSource: func(context.Context, api.Target) (*e2e.PreKeyBundle, error) {
+			return srv.E2EBundle(), nil
+		}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := b.Attach("http-dev", dialer, session.TrustedRootAuth(srv.RootPub()),
+		session.DeviceInfo{Platform: "web"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	defer b.Stop(context.Background())
+	s := &Server{Batur: b}
+	s, err = New(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cleanup := func() {}
+	_ = cleanup
+	waitOnlineSimple(t, s)
+	st, err := b.Status("http-dev")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.SendText(context.Background(), "http-dev", api.Target{JID: st.Account}, "history-one"); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	var found string
+	for time.Now().Before(deadline) {
+		h, err := b.History(context.Background(), "http-dev", st.Account, 64)
+		if err == nil {
+			for _, m := range h {
+				if m.Text == "history-one" {
+					found = m.ID
+					break
+				}
+			}
+		}
+		if found != "" {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if found == "" {
+		t.Fatal("message never reached history")
+	}
+	ts := httptest.NewServer(s.srv.Handler)
+	defer ts.Close()
+	resp, err := http.Get(ts.URL + "/v1/sessions/http-dev/history/" + found + "?chat=" + url.QueryEscape(st.Account))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b1, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, b1)
+	}
+	var got map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
+		t.Fatal(err)
+	}
+	if got["id"] != found {
+		t.Fatalf("id = %v want %s", got["id"], found)
+	}
+	if got["text"] != "history-one" {
+		t.Fatalf("text = %v", got["text"])
+	}
+	// Missing message -> 404
+	resp2, err := http.Get(ts.URL + "/v1/sessions/http-dev/history/does-not-exist?chat=" + url.QueryEscape(st.Account))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp2.Body.Close()
+	if resp2.StatusCode != http.StatusNotFound {
+		t.Fatalf("missing status=%d", resp2.StatusCode)
+	}
+}

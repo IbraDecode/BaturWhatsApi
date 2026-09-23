@@ -236,6 +236,40 @@ func (b *Batur) History(ctx context.Context, sessionID, chat string, limit int) 
 	return list[len(list)-limit:], nil
 }
 
+// HistoryOne scans the session's stored history for a message by id. If
+// chat is non-empty the search is bounded to that chat; otherwise it
+// walks every chat the session knows about. Returns ErrUnknownMessage
+// when no entry matches.
+var ErrUnknownMessage = errors.New("batur: message not found in history")
+
+func (b *Batur) HistoryOne(ctx context.Context, sessionID, msgID, chat string) (*StoredMessage, error) {
+	if b.history == nil {
+		return nil, errors.New("batur: history not enabled")
+	}
+	if chat != "" {
+		list := b.history.loadLocked(ctx, sessionID, chat)
+		for i := range list {
+			if list[i].ID == msgID {
+				return &list[i], nil
+			}
+		}
+		return nil, ErrUnknownMessage
+	}
+	chats, err := b.RecentChats(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	for _, c := range chats {
+		list := b.history.loadLocked(ctx, sessionID, c)
+		for i := range list {
+			if list[i].ID == msgID {
+				return &list[i], nil
+			}
+		}
+	}
+	return nil, ErrUnknownMessage
+}
+
 // RecentChats lists chat JIDs that have stored history for a session.
 func (b *Batur) RecentChats(ctx context.Context, sessionID string) ([]string, error) {
 	if b.history == nil {

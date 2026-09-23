@@ -69,6 +69,7 @@ func New(s *Server) (*Server, error) {
 	mux.HandleFunc("GET /v1/sessions/{id}/contacts", s.hSessionContacts)
 	mux.HandleFunc("GET /v1/sessions/{id}/chats", s.hSessionChats)
 	mux.HandleFunc("GET /v1/sessions/{id}/history", s.hSessionHistory)
+	mux.HandleFunc("GET /v1/sessions/{id}/history/{msgID}", s.hSessionHistoryOne)
 	s.srv = &http.Server{
 		Addr:         s.Bind,
 		Handler:      s.auth(mux),
@@ -436,6 +437,24 @@ func (s *Server) hSessionHistory(w http.ResponseWriter, r *http.Request) {
 		next = end
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"chat": chat, "messages": page, "next_cursor": next})
+}
+
+// hSessionHistoryOne serves a single message by id, optionally narrowed
+// to a chat via ?chat=<jid>. Returns 404 when no entry matches.
+func (s *Server) hSessionHistoryOne(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	msgID := r.PathValue("msgID")
+	chat := r.URL.Query().Get("chat")
+	msg, err := s.Batur.HistoryOne(r.Context(), id, msgID, chat)
+	if err != nil {
+		if errors.Is(err, api.ErrUnknownMessage) {
+			writeErr(w, http.StatusNotFound, err.Error())
+			return
+		}
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, msg)
 }
 
 // hEvents streams engine events as Server-Sent Events. Optional

@@ -41,7 +41,11 @@ Honest register. Anything production-relevant lives here until fixed.
 11. The mock server's "account JID" and cert blob are synthetic —
     useful for integration, never for wire compatibility claims.
 
-## Resolved (keep for archaeology)
+- 2026-09-23: **secrets-at-rest** now sealed with AES-256-GCM via
+  `storage.SecureKV` (`batur serve --seal-key[-file]` /
+  `BATUR_MASTER_KEY`, `batur keygen`); key-path bound as AEAD AAD
+  (replay-to-other-key rejected), wrong master refuses to boot (fail
+  closed), verified on disk: no plaintext seeds, sealed resume works.
 
 - 2026-09-23: T-001 CertChain verifier (security/wacert, Ed25519 stdlib)
   + TrustedRootAuth/PinFirstContact policies; race suite green (T-003):

@@ -78,6 +78,8 @@ type Options struct {
 	Bus *events.Bus
 	// Dict overrides the protocol token dictionary.
 	Dict *token.Dictionary
+	// MasterKey (32 bytes) seals all stored values at rest (AES-256-GCM).
+	MasterKey []byte
 	// Recovery tuning.
 	BaseBackoff time.Duration
 	MaxBackoff  time.Duration
@@ -99,6 +101,13 @@ type Batur struct {
 func New(opts Options) (*Batur, error) {
 	if opts.Store == nil {
 		opts.Store = storage.NewMemory()
+	}
+	if len(opts.MasterKey) > 0 {
+		sealed, err := storage.NewSecureKV(opts.Store, opts.MasterKey)
+		if err != nil {
+			return nil, err
+		}
+		opts.Store = sealed
 	}
 	bus := opts.Bus
 	owns := false

@@ -11,6 +11,7 @@ Status: TODO / IN_PROGRESS / BLOCKED / DONE.
 | T-002 | Session-scale memory/CPU benchmark harness (idle + message load) | DONE | internal/bench: footprint regression guard (512KiB budget), throughput 52K rps, codec/handshake benches |
 | T-003 | `-race` clean run of full suite (currently passes w/o race) | DONE | 3 race classes fixed (cipher mutex, session write ordering lock, supervisor sess pointer) |
 | T-004 | Storage hardening: dir fsync on write, manifest crash-test | TODO | ADR-0004 consequences |
+| T-005 | Secrets-at-rest sealing (AES-256-GCM SecureKV + keygen + serve flags) | DONE | closes audit risk #2 (2026-09-23) |
 
 ## P1 — protocol completeness
 

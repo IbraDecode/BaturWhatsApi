@@ -7,11 +7,18 @@ Single binary `batur` + data directory:
 ```
 bin/batur doctor            # self-check (keygen, codec, engine connect, e2e)
 bin/batur demo              # in-process smoke (mock server)
-bin/batur serve --mock --data /var/lib/batur --bind 127.0.0.1:8080
+bin/batur serve --mock --data /var/lib/batur --bind 127.0.0.1:8080 \
+    --seal-key-file /etc/batur/master.key
                             # REST+SSE API; sessions persist in --data
                             # BATUR_API_TOKEN env enables bearer auth (required
                             # for non-localhost binds)
+                            # --seal-key-file / BATUR_MASTER_KEY seals secrets
+                            # at rest (AES-256-GCM). Generate once:
+bin/batur keygen > /etc/batur/master.key && chmod 600 /etc/batur/master.key
 ```
+
+**Losing the master key = losing all session identities** (sealed blobs
+cannot be recovered). Back it up with the data directory.
 
 Embedded usage (recommended today): import `api`, provide a
 `transport.Dialer` (ws dialer for WhatsApp web endpoint, or your own
@@ -38,8 +45,11 @@ proxy), a storage dir, and a `ServerAuth` policy.
 
 ## Backups / secrets
 
-- The data directory contains session credentials (X25519 seeds).
-  Back it up encrypted; treat it as secret material.
+- With `--seal-key`, the data directory contains only AES-256-GCM sealed
+  blobs (safe to store like ciphertext). Without it, credentials are
+  plaintext JSON — production should always enable sealing.
+- Back up the data directory AND the master key together; without the
+  key the data is unrecoverable by design.
 - Rotation: stop sessions → move the dir; a session bound to a lost dir
   must re-register (new identity).
 

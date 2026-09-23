@@ -19,7 +19,7 @@ itself 24/7 (supervisor + automatic recovery).
 |----------------------|--------|----------|
 | Architecture         | ✅     | `docs/architecture/ARCHITECTURE.md`, 5 ADRs |
 | Protocol layer       | ✅     | WAWebMulti binary node codec + dictionaries + zlib + pb wire subset; fuzz round-trip (500 cases) |
-| Security layer       | ✅     | Noise_XX_25519_AESGCM_SHA256 (WhatsApp variant), AES-256-GCM ctr ciphers, HKDF RFC 5869 vectors, **CertChain Ed25519 verification (wacert)** + fail-closed auth policies |
+| Security layer       | ✅     | Noise_XX_25519_AESGCM_SHA256 (WhatsApp variant), AES-256-GCM ctr ciphers, HKDF RFC 5869 vectors, CertChain Ed25519 verification (wacert), fail-closed auth, **AES-256-GCM sealed storage** |
 | Transport            | ✅     | RFC 6455 WS client (masked, fragmented, ping/pong, size limits) + in-memory pipe |
 | Session engine       | ✅     | full lifecycle, request/response matching, keepalive, stale detection, single-reader concurrency contract |
 | State machine        | ✅     | 10 explicit states, legal-transition enforcement, watchers, forced-recovery path |

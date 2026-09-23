@@ -17,6 +17,7 @@ import (
 	"os"
 	"os/signal"
 	"runtime"
+	"strings"
 	"syscall"
 	"time"
 
@@ -54,6 +55,14 @@ func main() {
 		err = demo()
 	case "serve":
 		err = serve()
+	case "keygen":
+		key := make([]byte, 32)
+		_, rerr := rand.Read(key)
+		if rerr != nil {
+			err = rerr
+		} else {
+			fmt.Printf("%x\n", key)
+		}
 	default:
 		usage()
 		os.Exit(2)
@@ -222,12 +231,33 @@ func serve() error {
 	bind := fs.String("bind", "127.0.0.1:8080", "HTTP bind address")
 	data := fs.String("data", "", "session data directory (empty = ephemeral in-memory)")
 	mock := fs.Bool("mock", false, "run with the in-process mock WhatsApp-web server (API development)")
+	sealKey := fs.String("seal-key", "", "64-hex master key sealing secrets at rest (or $BATUR_MASTER_KEY, or --seal-key-file)")
+	sealFile := fs.String("seal-key-file", "", "file containing the master key hex")
 	_ = fs.Parse(os.Args[2:])
 
 	dict := token.Default()
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	var ao api.Options = api.Options{Dict: dict}
+	masterHex := strings.TrimSpace(*sealKey)
+	if masterHex == "" {
+		masterHex = os.Getenv("BATUR_MASTER_KEY")
+	}
+	if masterHex == "" && *sealFile != "" {
+		pem, rerr := os.ReadFile(*sealFile)
+		if rerr != nil {
+			return rerr
+		}
+		masterHex = strings.TrimSpace(string(pem))
+	}
+	if masterHex != "" {
+		mk, kerr := storage.MasterKeyFromHex(masterHex)
+		if kerr != nil {
+			return kerr
+		}
+		ao.MasterKey = mk
+		slog.Info("secrets-at-rest sealing enabled (AES-256-GCM)")
+	}
 	if *data != "" {
 		store, err := storage.NewFileStore(*data)
 		if err != nil {

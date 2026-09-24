@@ -37,7 +37,7 @@ var (
 	ErrNoDialer         = errors.New("pairing: dialer required")
 )
 
-	// PairingResult contains the credentials received after a successful scan.
+// PairingResult contains the credentials received after a successful scan.
 // Noise keys are X25519. NoiseKeySeed is the 32-byte private key.
 type PairingResult struct {
 	AccountJID     string    `json:"account_jid"`
@@ -119,8 +119,9 @@ func Pair(ctx context.Context, cfg PairingConfig) (*PairingResult, error) {
 	defer conn.Close()
 
 	payload := buildFinishPayload(cfg, noiseKP.Public())
+	var keys liveKeys
 	if liveConn(conn) {
-		payload = liveClientPayload()
+		payload, keys = liveClientPayload(noiseKP.Public())
 	}
 	hs, err := handshake(ctx, conn, noiseKP, cfg.ServerAuth, payload)
 	if err != nil {
@@ -158,9 +159,9 @@ func Pair(ctx context.Context, cfg PairingConfig) (*PairingResult, error) {
 		}); err != nil {
 			return nil, fmt.Errorf("pairing: pair-device: %w", err)
 		}
-		code, ref, expiresAt, err = waitForQR(waitCtx, conn, hs.recv, cfg.Dict, nil, &rest)
+		code, ref, expiresAt, err = waitForQR(waitCtx, conn, hs.recv, cfg.Dict, nil, &rest, liveKeys{})
 	} else {
-		code, ref, expiresAt, err = waitForQR(waitCtx, conn, hs.recv, cfg.Dict, sendNode, &rest)
+		code, ref, expiresAt, err = waitForQR(waitCtx, conn, hs.recv, cfg.Dict, sendNode, &rest, keys)
 	}
 	if err != nil {
 		return nil, err
@@ -297,15 +298,41 @@ func handshake(ctx context.Context, conn transport.Conn, staticKP *noise.KeyPair
 // liveClientPayload is the minimal ClientPayload WhatsApp Web accepts
 // before it will emit a pairing QR. Field numbers follow the public
 // WAWeb protobuf schema (userAgent=5, webInfo=6, connectReason=13).
-func liveClientPayload() []byte {
+type liveKeys struct {
+	noisePub []byte
+	identPub []byte
+	advPub   []byte
+}
+
+func (k liveKeys) qr(ref string) string {
+	b64 := base64.StdEncoding.EncodeToString
+	return strings.Join([]string{ref, b64(k.noisePub), b64(k.identPub), b64(k.advPub), "batur"}, ",")
+}
+
+func newLiveKeys() (liveKeys, []byte, error) {
 	ident, err := ecdh.X25519().GenerateKey(rand.Reader)
 	if err != nil {
-		return nil
+		return liveKeys{}, nil, err
+	}
+	adv, err := ecdh.X25519().GenerateKey(rand.Reader)
+	if err != nil {
+		return liveKeys{}, nil, err
 	}
 	spk, err := ecdh.X25519().GenerateKey(rand.Reader)
 	if err != nil {
-		return nil
+		return liveKeys{}, nil, err
 	}
+	keys := liveKeys{identPub: ident.PublicKey().Bytes(), advPub: adv.PublicKey().Bytes()}
+	return keys, spk.PublicKey().Bytes(), nil
+}
+
+func liveClientPayload(noisePub []byte) ([]byte, liveKeys) {
+	keys, spkPub, err := newLiveKeys()
+	if err != nil {
+		return nil, liveKeys{}
+	}
+	keys.noisePub = append([]byte(nil), noisePub...)
+	identPub := keys.identPub
 	var reg [4]byte
 	_, _ = rand.Read(reg[:])
 	ver := "2.3000.1048321180"
@@ -318,9 +345,9 @@ func liveClientPayload() []byte {
 	regData := pb.NewBuilder().
 		Bytes(1, reg[:]).
 		Bytes(2, []byte{5}).
-		Bytes(3, ident.PublicKey().Bytes()).
+		Bytes(3, identPub).
 		Bytes(4, reg[1:]).
-		Bytes(5, spk.PublicKey().Bytes()).
+		Bytes(5, spkPub).
 		Bytes(6, make([]byte, 64)).
 		Bytes(7, sum[:]).
 		Bytes(8, props).
@@ -345,7 +372,7 @@ func liveClientPayload() []byte {
 		Uint(12, 1).
 		Uint(13, 1).
 		Bytes(19, regData).
-		Build()
+		Build(), keys
 }
 
 func liveConn(conn transport.Conn) bool {
@@ -363,7 +390,7 @@ func buildFinishPayload(cfg PairingConfig, noisePub []byte) []byte {
 	return blob
 }
 
-func waitForQR(ctx context.Context, conn transport.Conn, recv *noise.Cipher, dict *token.Dictionary, ack func(binary.Node) error, rest *[]byte) (code, ref string, expiresAt time.Time, err error) {
+func waitForQR(ctx context.Context, conn transport.Conn, recv *noise.Cipher, dict *token.Dictionary, ack func(binary.Node) error, rest *[]byte, keys liveKeys) (code, ref string, expiresAt time.Time, err error) {
 	for {
 		node, err := nextNode(ctx, conn, recv, dict, rest)
 		if err != nil {
@@ -391,6 +418,9 @@ func waitForQR(ctx context.Context, conn transport.Conn, recv *noise.Cipher, dic
 			if len(refs) > 0 {
 				code = refs[0]
 				ref = strings.Join(refs, ",")
+				if keys.noisePub != nil {
+					code = keys.qr(code)
+				}
 			}
 		}
 		if expStr := child.MustStringAttr("expires_at"); expStr != "" {

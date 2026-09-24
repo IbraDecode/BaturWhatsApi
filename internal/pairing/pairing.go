@@ -453,7 +453,11 @@ func ackIQ(n binary.Node) binary.Node {
 		"type": "result",
 	}
 	if to := n.MustStringAttr("from"); to != "" {
-		attrs["to"] = to
+		if jid, err := binary.ParseJID(to); err == nil {
+			attrs["to"] = jid
+		} else {
+			attrs["to"] = to
+		}
 	}
 	return binary.Node{Tag: "iq", Attrs: attrs}
 }

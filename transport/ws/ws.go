@@ -24,6 +24,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/ibradecode/baturwhatsapi/transport"
 )
 
 // Frame size ceiling: WhatsApp frames never approach this; it exists to
@@ -67,10 +69,8 @@ func acceptKey(key string) string {
 }
 
 // Dial connects to a ws:// or wss:// URL and performs the opening
-// handshake. The returned Conn satisfies transport.Conn (adapted by
-// transport/ws glue elsewhere; here we return the concrete type plus a
-// BindingHeader for the noise channel binding).
-func (d *Dialer) Dial(ctx context.Context, rawURL string) (*Conn, error) {
+// handshake. The returned Conn satisfies transport.Conn.
+func (d *Dialer) Dial(ctx context.Context, rawURL string) (transport.Conn, error) {
 	u, err := url.Parse(rawURL)
 	if err != nil {
 		return nil, fmt.Errorf("ws: parse url: %w", err)
@@ -225,6 +225,11 @@ func (c *Conn) SendBinary(ctx context.Context, payload []byte) error {
 // SendText writes a single text frame.
 func (c *Conn) SendText(ctx context.Context, payload []byte) error {
 	return c.writeFrame(ctx, 0x1, payload)
+}
+
+// SendTextString writes a single text frame with a string payload.
+func (c *Conn) SendTextString(ctx context.Context, text string) error {
+	return c.writeFrame(ctx, 0x1, []byte(text))
 }
 
 // SendPing emits a ping frame (server keep-alive or client liveness).

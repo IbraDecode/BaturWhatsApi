@@ -57,6 +57,10 @@ func (p *pipeEnd) SendBinary(ctx context.Context, frame []byte) error {
 	}
 }
 
+func (p *pipeEnd) SendText(ctx context.Context, text []byte) error {
+	return p.SendBinary(ctx, text)
+}
+
 func (p *pipeEnd) ReceiveBinary(ctx context.Context) ([]byte, error) {
 	select {
 	case f := <-p.recv:

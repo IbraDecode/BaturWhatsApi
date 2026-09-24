@@ -15,6 +15,8 @@ var ErrClosed = errors.New("transport: connection closed")
 type Conn interface {
 	// SendBinary writes one complete frame.
 	SendBinary(ctx context.Context, frame []byte) error
+	// SendText writes one complete text frame with byte payload.
+	SendText(ctx context.Context, text []byte) error
 	// ReceiveBinary blocks for the next frame (empty slice or error after
 	// Close).
 	ReceiveBinary(ctx context.Context) ([]byte, error)

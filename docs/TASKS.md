@@ -19,7 +19,7 @@ Status: TODO / IN_PROGRESS / BLOCKED / DONE.
 |---|------|--------|
 | T-101 | Signal e2e crypto engine: identity keys, prekeys, X3DH/Double Ratchet (own implementation; stdlib crypto) | DONE | security/e2e: verified bundles, out-of-order skipping, replay/tamper guards, persisted ratchets |
 | T-102 | WhatsApp wire-compatible SignalMessage + live receipts | BLOCKED | needs live WhatsApp account/network to verify byte-for-byte Signal interop (human action + real device). Engine-to-engine e2e already live via mock relay. |
-| T-103 | Registration & QR/pairing-code flow (companion platform) | TODO |
+| T-103 | Registration & QR/pairing-code flow (companion platform) | IN_PROGRESS | mock companion flow DONE: CLI (`batur pair --mock --data DIR`, resumed by `serve --mock`) and `POST /v1/pair` (attaches the session). Live WhatsApp companion registration still needs a real device. |
 | T-104 | Sync engine: contacts, chats, history, appstate + checkpoints | IN_PROGRESS | contacts+chats+message-history DONE; appstate/history-replay via server pending |
 | T-105 | Receipt/ack state model in domain events | DONE | AckState pending/sent/delivered/read/received/failed; monotonic rank in HistoryStore |
 | T-106 | Keep-alive policy tuning: exponential idle ping, server config-driven | TODO |

@@ -51,6 +51,7 @@ go run ./cmd/batur doctor --skip-engine --skip-e2e   # smoke checks only (exit 2
 go run ./cmd/batur serve --mock --bind 127.0.0.1:8080   # REST + SSE API
 go run ./cmd/batur serve --mock --media-demo             # additionally pushes an image message
 go run ./cmd/batur serve --log-format json               # structured logs for log aggregators
+go run ./cmd/batur pair --mock --data ./data            # companion pairing; serve --mock --data ./data resumes it
 go run ./cmd/batur keygen --output-file seal.key         # 32-byte master key, 0600 perms, atomic temp+rename
 go run ./cmd/batur bench --json                          # machine-readable benchmark numbers
 ```
@@ -81,6 +82,7 @@ GET  /v1/sessions/{id}              one session
 DELETE /v1/sessions/{id}            detach
 POST /v1/sessions/{id}/iq           raw protocol bridge
 POST /v1/sessions/{id}/text         encrypted send (when a bundle source is wired)
+POST /v1/pair                       companion pairing (mock when serve --mock; attaches the session)
 POST /v1/sessions/{id}/sync         resumable contacts/chats sync
 GET  /v1/sessions/{id}/contacts     synced contacts snapshot
 GET  /v1/sessions/{id}/chats        synced chats snapshot

@@ -14,6 +14,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -23,8 +24,11 @@ import (
 
 	"github.com/ibradecode/baturwhatsapi/api"
 	"github.com/ibradecode/baturwhatsapi/events"
+	"github.com/ibradecode/baturwhatsapi/internal/pairing"
 	"github.com/ibradecode/baturwhatsapi/internal/version"
 	"github.com/ibradecode/baturwhatsapi/protocol/binary"
+	"github.com/ibradecode/baturwhatsapi/session"
+	"github.com/ibradecode/baturwhatsapi/transport"
 	"github.com/ibradecode/baturwhatsapi/transport/ws"
 )
 
@@ -40,6 +44,9 @@ type Server struct {
 	MaxBodyBytes   int64         // cap POST request body size; 0 = default 1 MiB
 	ReadTimeout    time.Duration // HTTP ReadTimeout; 0 = default 15s
 	WSPingInterval time.Duration // WS bridge keepalive ping; 0 = default 25s
+	// PairDialer + PairAuth enable POST /v1/pair (companion flow).
+	PairDialer transport.Dialer
+	PairAuth   session.ServerAuth
 
 	srv     *http.Server
 	testURL string // set by tests when routed through httptest
@@ -74,6 +81,7 @@ func New(s *Server) (*Server, error) {
 	mux.HandleFunc("GET /v1/sessions/{id}/chats", s.hSessionChats)
 	mux.HandleFunc("GET /v1/sessions/{id}/history", s.hSessionHistory)
 	mux.HandleFunc("GET /v1/sessions/{id}/history/{msgID}", s.hSessionHistoryOne)
+	mux.HandleFunc("POST /v1/pair", s.hPair)
 	s.srv = &http.Server{
 		Addr:         s.Bind,
 		Handler:      s.logRequests(s.auth(mux)),
@@ -422,6 +430,91 @@ func (s *Server) hSessionText(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusAccepted, map[string]bool{"ok": true})
+}
+
+type pairRequest struct {
+	SessionID  string `json:"session_id"`
+	DeviceName string `json:"device_name"`
+	Platform   string `json:"platform"`
+	Edge       string `json:"edge"`
+	Timeout    string `json:"timeout"`
+}
+
+// hPair runs the companion pairing flow (T-103) and attaches the session.
+// The engine must have a PairDialer and PairAuth; otherwise this is 501.
+func (s *Server) hPair(w http.ResponseWriter, r *http.Request) {
+	if s.PairDialer == nil || s.PairAuth == nil {
+		writeErr(w, http.StatusNotImplemented, "pairing dialer not configured")
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, s.bodyLimit())
+	var req pairRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
+		var max *http.MaxBytesError
+		if errors.As(err, &max) {
+			writeErr(w, http.StatusRequestEntityTooLarge, "body too large")
+			return
+		}
+		writeErr(w, http.StatusBadRequest, "bad request json")
+		return
+	}
+	timeout := 60 * time.Second
+	if req.Timeout != "" {
+		d, err := time.ParseDuration(req.Timeout)
+		if err != nil {
+			writeErr(w, http.StatusBadRequest, "bad timeout")
+			return
+		}
+		timeout = d
+	}
+	if req.Platform == "" {
+		req.Platform = "web"
+	}
+	if req.DeviceName == "" {
+		req.DeviceName = "batur"
+	}
+	var code, ref string
+	var expires time.Time
+	res, err := pairing.Pair(r.Context(), pairing.PairingConfig{
+		EdgeServer: req.Edge,
+		DeviceID:   req.SessionID,
+		DeviceName: req.DeviceName,
+		Platform:   req.Platform,
+		Dialer:     s.PairDialer,
+		ServerAuth: s.PairAuth,
+		QRTimeout:  timeout,
+		QRCallback: func(c, rf string, exp time.Time) error {
+			code, ref, expires = c, rf, exp
+			return nil
+		},
+	})
+	if err != nil {
+		writeErr(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	if err := s.Batur.RememberPair(r.Context(), res.DeviceID, session.Credentials{
+		NoiseKeySeed:   res.NoiseKeySeed,
+		RegistrationID: res.RegistrationID,
+		DeviceID:       res.DeviceID,
+		AccountJID:     res.AccountJID,
+		ServerStatic:   res.ServerStatic,
+	}, session.DeviceInfo{Platform: req.Platform, DeviceName: req.DeviceName}); err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if err := s.Batur.Attach(res.DeviceID, s.PairDialer, s.PairAuth,
+		session.DeviceInfo{Platform: req.Platform, DeviceName: req.DeviceName}); err != nil {
+		writeErr(w, http.StatusConflict, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"session_id":  res.DeviceID,
+		"account":     res.AccountJID,
+		"code":        code,
+		"ref":         ref,
+		"expires_at":  expires,
+		"reg_id":      res.RegistrationID,
+	})
 }
 
 // hSessionSync triggers a resumable sync run for one session.

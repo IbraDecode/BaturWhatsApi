@@ -61,7 +61,7 @@ func dialClient(t *testing.T, addr string) *Conn {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { c.Close() })
-	return c
+	return c.(*Conn)
 }
 
 func TestHandshakeAndFrames(t *testing.T) {
@@ -264,7 +264,7 @@ func TestUpgradeServerMode(t *testing.T) {
 	defer c.Close()
 
 	msg := []byte("server-mode echo")
-	if err := c.SendText(ctx, msg); err != nil {
+	if err := c.(*Conn).SendText(ctx, msg); err != nil {
 		t.Fatal(err)
 	}
 	got, err := c.ReceiveBinary(ctx)

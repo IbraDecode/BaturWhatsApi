@@ -27,14 +27,18 @@ import (
 	"github.com/ibradecode/baturwhatsapi/apiserver"
 	"github.com/ibradecode/baturwhatsapi/events"
 	"github.com/ibradecode/baturwhatsapi/internal/mockserver"
+	"github.com/ibradecode/baturwhatsapi/internal/pairing"
 	"github.com/ibradecode/baturwhatsapi/internal/version"
 	"github.com/ibradecode/baturwhatsapi/protocol/binary"
 	"github.com/ibradecode/baturwhatsapi/protocol/token"
 	"github.com/ibradecode/baturwhatsapi/security/e2e"
 	"github.com/ibradecode/baturwhatsapi/security/noise"
+	"github.com/ibradecode/baturwhatsapi/security/wacert"
 	"github.com/ibradecode/baturwhatsapi/session"
 	"github.com/ibradecode/baturwhatsapi/statemachine"
 	"github.com/ibradecode/baturwhatsapi/storage"
+	"github.com/ibradecode/baturwhatsapi/transport"
+	"github.com/ibradecode/baturwhatsapi/transport/ws"
 )
 
 func main() {
@@ -64,6 +68,8 @@ func main() {
 		err = serve()
 	case "keygen":
 		err = keygen()
+	case "pair":
+		err = pair()
 	default:
 		usage()
 		os.Exit(2)
@@ -81,7 +87,7 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintf(os.Stderr, "usage: batur <version|doctor|bench|demo|serve [--bind addr] [--mock]|keygen [--output-file PATH]>\n")
+	fmt.Fprintf(os.Stderr, "usage: batur <version|doctor|bench|demo|serve [--bind addr] [--mock]|keygen [--output-file PATH]|pair [--mock] [--data PATH] [--device-id ID]>\n")
 }
 
 // versionCmd prints engine identity (version + channel + Go runtime).
@@ -460,6 +466,8 @@ func serve() error {
 		ao.Store = store
 	}
 	var b *api.Batur
+	var pairDialer transport.Dialer
+	var pairAuth session.ServerAuth
 	if *mock {
 		srv, err := mockserver.New(dict)
 		if err != nil {
@@ -474,14 +482,23 @@ func serve() error {
 			return err
 		}
 		dialer := mockserver.Dialer{Srv: srv}
-		if err := b.Attach("mock-1", dialer, session.TrustedRootAuth(srv.RootPub()),
-			session.DeviceInfo{Platform: "web", DeviceName: "serve-mock"}); err != nil {
+		auth := session.TrustedRootAuth(srv.RootPub())
+		pairDialer, pairAuth = dialer, auth
+		ids, err := attachFleet(b, dialer, auth, ao.Store)
+		if err != nil {
 			return err
+		}
+		if len(ids) == 0 {
+			if err := b.Attach("mock-1", dialer, auth,
+				session.DeviceInfo{Platform: "web", DeviceName: "serve-mock"}); err != nil {
+				return err
+			}
+			ids = []string{"mock-1"}
 		}
 		if err := b.Start(ctx); err != nil {
 			return err
 		}
-		slog.Info("serve: mock fleet attached", "session", "mock-1", "data", *data)
+		slog.Info("serve: mock fleet attached", "sessions", strings.Join(ids, ","), "data", *data)
 	} else {
 		return fmt.Errorf("real WhatsApp-web dialer/registration is pending (docs/TASKS.md T-101..T-103); use --mock for now")
 	}
@@ -490,6 +507,8 @@ func serve() error {
 		MaxBodyBytes:   int64(*maxBody),
 		ReadTimeout:    *readTimeout,
 		WSPingInterval: *wsPing,
+		PairDialer:     pairDialer,
+		PairAuth:       pairAuth,
 	})
 	if err != nil {
 		return err
@@ -506,6 +525,156 @@ func serve() error {
 	<-ctx.Done()
 	slog.Info("shutting down")
 	return b.Stop(context.Background())
+}
+
+type fleetRec struct {
+	SessionID string `json:"session_id"`
+	Account   string `json:"account"`
+	Platform  string `json:"platform"`
+	Name      string `json:"name"`
+}
+
+func attachFleet(b *api.Batur, dialer transport.Dialer, auth session.ServerAuth, store storage.KV) ([]string, error) {
+	if store == nil {
+		return nil, nil
+	}
+	keys, err := store.List(context.Background(), "fleet/")
+	if err != nil {
+		return nil, err
+	}
+	var ids []string
+	for _, key := range keys {
+		raw, err := store.Get(context.Background(), key)
+		if err != nil {
+			return nil, err
+		}
+		var rec fleetRec
+		if err := json.Unmarshal(raw, &rec); err != nil {
+			return nil, fmt.Errorf("fleet record %s: %w", key, err)
+		}
+		if rec.SessionID == "" {
+			continue
+		}
+		plat, name := rec.Platform, rec.Name
+		if plat == "" {
+			plat = "web"
+		}
+		if name == "" {
+			name = "batur"
+		}
+		if err := b.Attach(rec.SessionID, dialer, auth, session.DeviceInfo{Platform: plat, DeviceName: name}); err != nil {
+			return nil, err
+		}
+		ids = append(ids, rec.SessionID)
+	}
+	return ids, nil
+}
+
+func pair() error {
+	fs := flag.NewFlagSet("pair", flag.ExitOnError)
+	deviceID := fs.String("device-id", "", "unique device identifier (auto-generated if empty)")
+	deviceName := fs.String("device-name", "batur", "device display name")
+	platform := fs.String("platform", "web", "platform identifier (web, desktop, etc.)")
+	edgeServer := fs.String("edge", "wss://web.whatsapp.com/ws", "edge WebSocket URL")
+	dataDir := fs.String("data", "", "session data directory (same flag as serve; empty = in-memory)")
+	mock := fs.Bool("mock", false, "pair against an in-process mock server (no network)")
+	qrWait := fs.Duration("qr-timeout", 5*time.Minute, "how long to wait for the QR scan")
+	logLevel := fs.String("log-level", "info", "log level: debug|info|warn|error")
+	logFormat := fs.String("log-format", "text", "log format: text|json")
+	_ = fs.Parse(os.Args[2:])
+
+	if err := applyLogOpts(*logLevel, *logFormat); err != nil {
+		return err
+	}
+	if *deviceID == "" {
+		b := make([]byte, 8)
+		if _, err := rand.Read(b); err != nil {
+			return err
+		}
+		*deviceID = fmt.Sprintf("batur-%x", b)
+		slog.Info("generated device ID", "device_id", *deviceID)
+	}
+
+	var store storage.KV
+	if *dataDir != "" {
+		s, err := storage.NewFileStore(*dataDir)
+		if err != nil {
+			return err
+		}
+		defer s.Close()
+		store = s
+	} else {
+		store = storage.NewMemory()
+	}
+
+	var dialer transport.Dialer
+	auth := session.TrustedRootAuth(wacert.RootPubKey)
+	edge := *edgeServer
+	if *mock {
+		srv, err := mockserver.New(token.Default())
+		if err != nil {
+			return err
+		}
+		dialer = mockserver.Dialer{Srv: srv}
+		auth = session.TrustedRootAuth(srv.RootPub())
+		edge = "mock://pair"
+	} else {
+		dialer = ws.NewDialer(ws.Options{HandshakeTimeout: 30 * time.Second})
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	cfg := pairing.PairingConfig{
+		EdgeServer: edge,
+		DeviceID:   *deviceID,
+		DeviceName: *deviceName,
+		Platform:   *platform,
+		Dialer:     dialer,
+		ServerAuth: auth,
+		Logger:     slog.Default().With("comp", "pair"),
+		QRCallback: func(code, ref string, expiresAt time.Time) error {
+			fmt.Println("\n=== Batur pairing ===")
+			fmt.Printf("Code:    %s\n", code)
+			fmt.Printf("Ref:     %s\n", ref)
+			if !expiresAt.IsZero() {
+				fmt.Printf("Expires: %s\n", expiresAt.Format(time.RFC3339))
+			}
+			fmt.Println("Waiting for the linked device to confirm...")
+			return nil
+		},
+		QRTimeout: *qrWait,
+	}
+
+	slog.Info("starting pairing", "device_id", *deviceID, "edge", edge, "mock", *mock)
+	result, err := pairing.Pair(ctx, cfg)
+	if err != nil {
+		return fmt.Errorf("pairing failed: %w", err)
+	}
+
+	eng, err := api.New(api.Options{Store: store})
+	if err != nil {
+		return err
+	}
+	if err := eng.RememberPair(ctx, result.DeviceID, session.Credentials{
+		NoiseKeySeed:   result.NoiseKeySeed,
+		RegistrationID: result.RegistrationID,
+		DeviceID:       result.DeviceID,
+		AccountJID:     result.AccountJID,
+		ServerStatic:   result.ServerStatic,
+	}, session.DeviceInfo{Platform: *platform, DeviceName: *deviceName}); err != nil {
+		return fmt.Errorf("store credentials: %w", err)
+	}
+	slog.Info("credentials stored", "session", result.DeviceID)
+
+	fmt.Printf("\nPairing complete\n")
+	fmt.Printf("  Account: %s\n", result.AccountJID)
+	fmt.Printf("  Device:  %s\n", result.DeviceID)
+	if *dataDir != "" {
+		fmt.Printf("  Stored:  %s\n", *dataDir)
+		fmt.Printf("\nNext: batur serve --data %s\n", *dataDir)
+	}
+	return nil
 }
 
 func hexID() string {

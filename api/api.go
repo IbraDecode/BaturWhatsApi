@@ -6,6 +6,8 @@ package api
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/json"
 	"errors"
 	"time"
 
@@ -184,6 +186,46 @@ func (b *Batur) Attach(id string, dialer transport.Dialer, auth session.ServerAu
 	}
 	b.sess[id] = nil // lifecycle owned by supervisor
 	return nil
+}
+
+// RememberPair persists a pairing result under the session key the engine
+// reloads on the next start, plus a fleet record so serve can reattach it.
+// Identity and signature seeds are generated when the result has none.
+func (b *Batur) RememberPair(ctx context.Context, id string, creds session.Credentials, device session.DeviceInfo) error {
+	if id == "" {
+		return errors.New("batur: empty session id")
+	}
+	if len(creds.IdentitySeed) != 32 {
+		seed := make([]byte, 32)
+		if _, err := rand.Read(seed); err != nil {
+			return err
+		}
+		creds.IdentitySeed = seed
+	}
+	if len(creds.IdentitySigSeed) != 32 {
+		seed := make([]byte, 32)
+		if _, err := rand.Read(seed); err != nil {
+			return err
+		}
+		creds.IdentitySigSeed = seed
+	}
+	raw, err := json.Marshal(creds)
+	if err != nil {
+		return err
+	}
+	if err := b.opts.Store.Set(ctx, "session/"+id+"/credentials", raw); err != nil {
+		return err
+	}
+	meta, err := json.Marshal(map[string]string{
+		"session_id": id,
+		"account":    creds.AccountJID,
+		"platform":   device.Platform,
+		"name":       device.DeviceName,
+	})
+	if err != nil {
+		return err
+	}
+	return b.opts.Store.Set(ctx, "fleet/"+id, meta)
 }
 
 // Detach removes a session from the fleet (stops it cleanly).

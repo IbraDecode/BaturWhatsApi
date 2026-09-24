@@ -251,8 +251,12 @@ func (s *Session) Credentials() Credentials {
 	return s.credsSnapshot()
 }
 
-// DeviceID is the stable device identifier derived from the session id.
+// DeviceID is the stable device identifier. A paired credential wins;
+// otherwise it is derived from the session id.
 func (s *Session) DeviceID() string {
+	if id := s.credsSnapshot().DeviceID; id != "" {
+		return id
+	}
 	return sha1Short([]byte(s.opts.ID))
 }
 

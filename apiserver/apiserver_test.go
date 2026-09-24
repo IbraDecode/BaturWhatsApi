@@ -1110,3 +1110,37 @@ func TestHistoryOne(t *testing.T) {
 		t.Fatalf("missing status=%d", resp2.StatusCode)
 	}
 }
+
+func TestPairEndpoint(t *testing.T) {
+	s, srv, cleanup, b := newTestServerEx(t, "", true)
+	defer cleanup()
+	s.PairDialer = mockserver.Dialer{Srv: srv}
+	s.PairAuth = session.TrustedRootAuth(srv.RootPub())
+	body := bytes.NewBufferString(`{"session_id":"paired-1","device_name":"http","platform":"web","timeout":"5s"}`)
+	resp, err := http.Post(s.testURL+"/v1/pair", "application/json", body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status=%d body=%s", resp.StatusCode, raw)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got["session_id"] != "paired-1" || got["account"] == "" || got["code"] == "" {
+		t.Fatalf("pair response %+v", got)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		st, err := b.Status("paired-1")
+		if err == nil && (st.State == string(statemachine.Online) || st.State == "online") {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	st, _ := b.Status("paired-1")
+	t.Fatalf("paired session not online: %+v", st)
+}

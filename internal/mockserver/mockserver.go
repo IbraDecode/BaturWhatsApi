@@ -11,6 +11,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -437,6 +438,8 @@ func (s *Server) handle(ctx context.Context, ds *deviceSession, n binary.Node) b
 		case typ == "get" && n.MustStringAttr("xmlns") == "batur.sync":
 			s.push(ctx, ds, s.syncPage(id, n.MustStringAttr("stage"),
 				n.MustStringAttr("cursor")))
+		case typ == "get" && n.MustStringAttr("xmlns") == "batur.pair":
+			s.pairDevice(ctx, ds, id, n)
 		default: // connect config iq and everything else -> result
 			resp := binary.Node{
 				Tag: "iq",
@@ -449,6 +452,45 @@ func (s *Server) handle(ctx context.Context, ds *deviceSession, n binary.Node) b
 		}
 	}
 	return false
+}
+
+// pairDevice answers a companion pairing IQ: first a QR challenge, then
+// pair-success carrying the account already assigned at handshake.
+// This is the mock companion flow (T-103), not live WhatsApp registration.
+func (s *Server) pairDevice(ctx context.Context, ds *deviceSession, id string, n binary.Node) {
+	child, _ := n.ChildByTag("pair-device")
+	deviceID := child.MustStringAttr("device_id")
+	if deviceID == "" {
+		deviceID = ds.reg.DeviceID
+	}
+	exp := time.Now().Add(2 * time.Minute).UTC().Format(time.RFC3339)
+	s.push(ctx, ds, binary.Node{
+		Tag:   "iq",
+		Attrs: binary.Attrs{"id": id, "type": "result"},
+		Content: []binary.Node{{
+			Tag: "pair-device",
+			Attrs: binary.Attrs{
+				"code":       "2@" + deviceID + "," + ds.reg.AccountJID,
+				"ref":        "ref-" + deviceID,
+				"expires_at": exp,
+			},
+		}},
+	})
+	s.push(ctx, ds, binary.Node{
+		Tag:   "iq",
+		Attrs: binary.Attrs{"id": id, "type": "result"},
+		Content: []binary.Node{{
+			Tag: "pair-success",
+			Attrs: binary.Attrs{
+				"account_jid":    ds.reg.AccountJID,
+				"device_id":      deviceID,
+				"server_static":  base64.StdEncoding.EncodeToString(s.static.Public()),
+				"cert_chain":     base64.StdEncoding.EncodeToString(s.certChain),
+				"reg_id":         "1",
+				"expires_at":     exp,
+			},
+		}},
+	})
 }
 
 func (s *Server) pushMessage(ctx context.Context, ds *deviceSession, text string) {

@@ -651,11 +651,18 @@ func pair() error {
 		Logger:     slog.Default().With("comp", "pair"),
 		QRCallback: func(code, ref string, expiresAt time.Time) error {
 			fmt.Println("\n=== Batur pairing ===")
-			fmt.Printf("Code:    %s\n", code)
-			fmt.Printf("Ref:     %s\n", ref)
+			if err := writeQR("batur-qr.png", code); err != nil {
+				fmt.Printf("Code: %s\n", code)
+				fmt.Println("qr:", err)
+			} else {
+				fmt.Println("QR:   batur-qr.png")
+				fmt.Printf("Code: %s\n", code)
+			}
 			if !expiresAt.IsZero() {
 				fmt.Printf("Expires: %s\n", expiresAt.Format(time.RFC3339))
 			}
+			fmt.Println("Buka batur-qr.png, lalu di ponsel:")
+			fmt.Println("WhatsApp -> Setelan -> Perangkat tertaut -> Tautkan perangkat")
 			fmt.Println("Waiting for the linked device to confirm...")
 			return nil
 		},

@@ -37,7 +37,7 @@ var (
 	ErrNoDialer         = errors.New("pairing: dialer required")
 )
 
-// PairingResult contains the credentials received after a successful scan.
+	// PairingResult contains the credentials received after a successful scan.
 // Noise keys are X25519. NoiseKeySeed is the 32-byte private key.
 type PairingResult struct {
 	AccountJID     string    `json:"account_jid"`
@@ -47,6 +47,9 @@ type PairingResult struct {
 	CertChain      []byte    `json:"cert_chain"`
 	RegistrationID uint32    `json:"reg_id"`
 	ExpiresAt      time.Time `json:"expires_at"`
+	// DeviceIdentity is the unsigned ADV blob from a live pair-success.
+	DeviceIdentity []byte `json:"-"`
+	KeyIndex       string `json:"-"`
 }
 
 // PairingConfig configures one pairing attempt.
@@ -168,7 +171,7 @@ func Pair(ctx context.Context, cfg PairingConfig) (*PairingResult, error) {
 		}
 	}
 
-	result, err := waitForCredentials(waitCtx, conn, hs.recv, cfg.Dict, &rest)
+	result, err := waitForCredentials(waitCtx, conn, hs.recv, cfg.Dict, &rest, sendNode)
 	if err != nil {
 		return nil, err
 	}
@@ -406,7 +409,7 @@ func waitForQR(ctx context.Context, conn transport.Conn, recv *noise.Cipher, dic
 	}
 }
 
-func waitForCredentials(ctx context.Context, conn transport.Conn, recv *noise.Cipher, dict *token.Dictionary, rest *[]byte) (*PairingResult, error) {
+func waitForCredentials(ctx context.Context, conn transport.Conn, recv *noise.Cipher, dict *token.Dictionary, rest *[]byte, reply func(binary.Node) error) (*PairingResult, error) {
 	for {
 		node, err := nextNode(ctx, conn, recv, dict, rest)
 		if err != nil {
@@ -422,7 +425,45 @@ func waitForCredentials(ctx context.Context, conn transport.Conn, recv *noise.Ci
 		if !ok {
 			continue
 		}
-		return parsePairSuccess(child)
+		result, err := parsePairSuccess(child)
+		if err != nil {
+			return nil, err
+		}
+		if reply != nil && node.MustStringAttr("xmlns") == "md" {
+			if err := reply(pairSuccessAck(node, result)); err != nil {
+				return nil, err
+			}
+		}
+		return result, nil
+	}
+}
+
+func signedDeviceIdentity(details []byte) []byte {
+	if len(details) == 0 {
+		return nil
+	}
+	// ADVSignedDeviceIdentity: details=1, deviceSignature=4.
+	// The account signature is filled by the phone; we echo the details
+	// and attach our own device signature once the identity key exists.
+	return pb.NewBuilder().Bytes(1, details).Build()
+}
+
+func pairSuccessAck(iq binary.Node, result *PairingResult) binary.Node {
+	signed := signedDeviceIdentity(result.DeviceIdentity)
+	return binary.Node{
+		Tag: "iq",
+		Attrs: binary.Attrs{
+			"id": iq.MustStringAttr("id"), "type": "result",
+			"to": mustJID("s.whatsapp.net"),
+		},
+		Content: []binary.Node{{
+			Tag: "pair-device-sign",
+			Content: []binary.Node{{
+				Tag:     "device-identity",
+				Attrs:   binary.Attrs{"key-index": result.KeyIndex},
+				Content: signed,
+			}},
+		}},
 	}
 }
 
@@ -445,6 +486,14 @@ func withLen(payload []byte) []byte {
 	out[2] = byte(n)
 	copy(out[3:], payload)
 	return out
+}
+
+func mustJID(raw string) binary.JID {
+	j, err := binary.ParseJID(raw)
+	if err != nil {
+		return binary.JID{}
+	}
+	return j
 }
 
 func ackIQ(n binary.Node) binary.Node {
@@ -528,6 +577,20 @@ func parsePairSuccess(node binary.Node) (*PairingResult, error) {
 		if t, err := time.Parse(time.RFC3339, exp); err == nil {
 			result.ExpiresAt = t
 		}
+	}
+	if dev, ok := node.ChildByTag("device"); ok {
+		if jid, ok := dev.JIDAttr("jid"); ok {
+			result.AccountJID = jid.String()
+		}
+	}
+	if ident, ok := node.ChildByTag("device-identity"); ok {
+		if raw, ok := ident.BytesContent(); ok {
+			result.DeviceIdentity = raw
+		}
+		result.KeyIndex = ident.MustStringAttr("key-index")
+	}
+	if result.KeyIndex == "" {
+		result.KeyIndex = "1"
 	}
 	if result.AccountJID == "" {
 		return nil, fmt.Errorf("%w: missing account", ErrPairingFailed)

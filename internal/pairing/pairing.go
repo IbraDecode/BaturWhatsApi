@@ -127,11 +127,7 @@ func Pair(ctx context.Context, cfg PairingConfig) (*PairingResult, error) {
 	live := liveConn(conn)
 	sendNode := func(n binary.Node) error {
 		plain := binary.MarshalDict(n, cfg.Dict)
-		frame := hs.send.Seal(nil, plain)
-		if live {
-			frame = withLen(frame)
-		}
-		return conn.SendBinary(ctx, frame)
+		return conn.SendBinary(ctx, hs.send.Seal(nil, plain))
 	}
 
 	waitCtx, cancel := context.WithTimeout(ctx, cfg.QRTimeout)
@@ -452,13 +448,14 @@ func withLen(payload []byte) []byte {
 }
 
 func ackIQ(n binary.Node) binary.Node {
-	return binary.Node{
-		Tag: "iq",
-		Attrs: binary.Attrs{
-			"id": n.MustStringAttr("id"), "type": "result",
-			"to": n.MustStringAttr("from"),
-		},
+	attrs := binary.Attrs{
+		"id":   n.MustStringAttr("id"),
+		"type": "result",
 	}
+	if to := n.MustStringAttr("from"); to != "" {
+		attrs["to"] = to
+	}
+	return binary.Node{Tag: "iq", Attrs: attrs}
 }
 
 func findIQChild(node binary.Node, tag string) (binary.Node, bool) {

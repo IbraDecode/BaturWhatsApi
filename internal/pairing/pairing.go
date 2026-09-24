@@ -231,7 +231,7 @@ func handshake(ctx context.Context, conn transport.Conn, staticKP *noise.KeyPair
 	if err != nil {
 		return nil, fmt.Errorf("pairing: server hello: %w", err)
 	}
-	if live && len(resp) >= 3 && resp[0] == 0 && resp[1] == 1 {
+	if live && len(resp) >= 3 && resp[0] == 0 && int(resp[0])<<16|int(resp[1])<<8|int(resp[2]) == len(resp)-3 {
 		resp = resp[3:]
 	}
 	shMsg, err := unwrapHello(resp, live)
@@ -261,7 +261,15 @@ func handshake(ctx context.Context, conn transport.Conn, staticKP *noise.KeyPair
 	if live {
 		finishField = 4
 	}
-	finish := wapb.WrapTop(finishField, (&wapb.ClientFinish{Static: clientStaticCT, Payload: clientPayloadCT}).Build())
+	var finishInner []byte
+	if live {
+		// Live schema is {static=1, payload=2}. The mock codec writes
+		// payload in field 3; keep that path untouched.
+		finishInner = pb.NewBuilder().Bytes(1, clientStaticCT).Bytes(2, clientPayloadCT).Build()
+	} else {
+		finishInner = (&wapb.ClientFinish{Static: clientStaticCT, Payload: clientPayloadCT}).Build()
+	}
+	finish := wapb.WrapTop(finishField, finishInner)
 	if err := conn.SendBinary(ctx, finish); err != nil {
 		return nil, err
 	}
@@ -291,7 +299,6 @@ func liveClientPayload() []byte {
 		Build()
 	web := pb.NewBuilder().Uint(4, 0).Build()
 	return pb.NewBuilder().
-		Bool(3, false).
 		Bytes(5, ua).
 		Bytes(6, web).
 		Uint(12, 1).

@@ -115,7 +115,9 @@ func NewHandshake(pattern string, header []byte) *Handshake {
 	}
 	nh := &Handshake{h: h, ck: h}
 	nh.k = gcm(nh.ck)
-	nh.Authenticate(header)
+	if len(header) > 0 {
+		nh.Authenticate(header)
+	}
 	return nh
 }
 

@@ -536,7 +536,8 @@ func whatsAppDial() ws.Options {
 		Header: http.Header{
 			"Origin": []string{"https://web.whatsapp.com"},
 		},
-		FramePrefix: []byte{'W', 'A', 6, byte(token.Default().Version)},
+		FramePrefix:  []byte{'W', 'A', 6, byte(token.Default().Version)},
+		LengthPrefix: true,
 	}
 }
 

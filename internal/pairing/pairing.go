@@ -9,12 +9,15 @@ package pairing
 
 import (
 	"context"
+	"crypto/ecdh"
+	"crypto/md5"
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/ibradecode/baturwhatsapi/internal/wapb"
@@ -284,6 +287,33 @@ func handshake(ctx context.Context, conn transport.Conn, staticKP *noise.KeyPair
 // before it will emit a pairing QR. Field numbers follow the public
 // WAWeb protobuf schema (userAgent=5, webInfo=6, connectReason=13).
 func liveClientPayload() []byte {
+	ident, err := ecdh.X25519().GenerateKey(rand.Reader)
+	if err != nil {
+		return nil
+	}
+	spk, err := ecdh.X25519().GenerateKey(rand.Reader)
+	if err != nil {
+		return nil
+	}
+	var reg [4]byte
+	_, _ = rand.Read(reg[:])
+	ver := "2.3000.1048321180"
+	sum := md5.Sum([]byte(ver))
+	props := pb.NewBuilder().
+		Bytes(1, []byte("batur")).
+		Uint(3, 1).
+		Bool(4, false).
+		Build()
+	regData := pb.NewBuilder().
+		Bytes(1, reg[:]).
+		Bytes(2, []byte{5}).
+		Bytes(3, ident.PublicKey().Bytes()).
+		Bytes(4, reg[1:]).
+		Bytes(5, spk.PublicKey().Bytes()).
+		Bytes(6, make([]byte, 64)).
+		Bytes(7, sum[:]).
+		Bytes(8, props).
+		Build()
 	app := pb.NewBuilder().Uint(1, 2).Uint(2, 3000).Uint(3, 1048321180).Build()
 	ua := pb.NewBuilder().
 		Uint(1, 14).
@@ -303,6 +333,7 @@ func liveClientPayload() []byte {
 		Bytes(6, web).
 		Uint(12, 1).
 		Uint(13, 1).
+		Bytes(19, regData).
 		Build()
 }
 
@@ -336,6 +367,21 @@ func waitForQR(ctx context.Context, conn transport.Conn, recv *noise.Cipher, dic
 		}
 		code = child.MustStringAttr("code")
 		ref = child.MustStringAttr("ref")
+		if code == "" {
+			var refs []string
+			for _, c := range child.Children() {
+				if c.Tag != "ref" {
+					continue
+				}
+				if t, ok := c.TextContent(); ok && t != "" {
+					refs = append(refs, t)
+				}
+			}
+			if len(refs) > 0 {
+				code = refs[0]
+				ref = strings.Join(refs, ",")
+			}
+		}
 		if expStr := child.MustStringAttr("expires_at"); expStr != "" {
 			if exp, perr := time.Parse(time.RFC3339, expStr); perr == nil {
 				expiresAt = exp
@@ -368,7 +414,11 @@ func waitForCredentials(ctx context.Context, conn transport.Conn, recv *noise.Ci
 }
 
 func findIQChild(node binary.Node, tag string) (binary.Node, bool) {
-	if node.Tag != "iq" || node.MustStringAttr("type") != "result" {
+	if node.Tag != "iq" {
+		return binary.Node{}, false
+	}
+	typ := node.MustStringAttr("type")
+	if typ != "result" && typ != "set" {
 		return binary.Node{}, false
 	}
 	return node.ChildByTag(tag)
@@ -379,16 +429,19 @@ func nextNode(ctx context.Context, conn transport.Conn, recv *noise.Cipher, dict
 	if err != nil {
 		return binary.Node{}, fmt.Errorf("pairing: receive: %w", err)
 	}
-	if len(raw) <= 8 && len(raw) >= 3 && raw[0] == 0x88 {
-		return binary.Node{}, fmt.Errorf("pairing: server refused handshake (%x)", raw)
+	if liveConn(conn) && len(raw) > 3 {
+		n := int(raw[0])<<16 | int(raw[1])<<8 | int(raw[2])
+		if n == len(raw)-3 {
+			raw = raw[3:]
+		}
 	}
 	plain, err := recv.Open(nil, raw)
 	if err != nil {
 		n := len(raw)
-		if n > 24 {
-			n = 24
+		if n > 64 {
+			n = 64
 		}
-		return binary.Node{}, fmt.Errorf("pairing: decrypt (%d bytes, head %x): %w", len(raw), raw[:n], err)
+		return binary.Node{}, fmt.Errorf("pairing: frame %d bytes %x: %w", len(raw), raw[:n], err)
 	}
 	node, err := binary.Decode(dict, plain)
 	if err != nil {

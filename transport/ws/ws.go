@@ -460,12 +460,6 @@ func (c *Conn) splitFrames(msg []byte) [][]byte {
 	if !c.lengthPrefix {
 		return [][]byte{msg}
 	}
-	// A 4-byte reply with no room for a payload is a server error code
-	// (for example 88 02 03 f3), not a length-prefixed frame.
-	if len(msg) == 4 {
-		c.fail(fmt.Errorf("ws: server error code %x", msg))
-		return nil
-	}
 	var out [][]byte
 	for len(msg) >= 3 {
 		n := int(msg[0])<<16 | int(msg[1])<<8 | int(msg[2])

@@ -8,6 +8,7 @@
 package pairing
 
 import (
+	"bytes"
 	"context"
 	"crypto/ecdh"
 	"crypto/md5"
@@ -123,34 +124,45 @@ func Pair(ctx context.Context, cfg PairingConfig) (*PairingResult, error) {
 		return nil, err
 	}
 
+	live := liveConn(conn)
 	sendNode := func(n binary.Node) error {
 		plain := binary.MarshalDict(n, cfg.Dict)
-		return conn.SendBinary(ctx, hs.send.Seal(nil, plain))
-	}
-
-	id := requestID()
-	if err := sendNode(binary.Node{
-		Tag: "iq",
-		Attrs: binary.Attrs{
-			"id": id, "type": "get", "xmlns": "batur.pair",
-			"to": "s.whatsapp.net",
-		},
-		Content: []binary.Node{{
-			Tag: "pair-device",
-			Attrs: binary.Attrs{
-				"device_id":   cfg.DeviceID,
-				"device_name": cfg.DeviceName,
-				"platform":    cfg.Platform,
-			},
-		}},
-	}); err != nil {
-		return nil, fmt.Errorf("pairing: pair-device: %w", err)
+		frame := hs.send.Seal(nil, plain)
+		if live {
+			frame = withLen(frame)
+		}
+		return conn.SendBinary(ctx, frame)
 	}
 
 	waitCtx, cancel := context.WithTimeout(ctx, cfg.QRTimeout)
 	defer cancel()
 
-	code, ref, expiresAt, err := waitForQR(waitCtx, conn, hs.recv, cfg.Dict)
+	var rest []byte
+	var code, ref string
+	var expiresAt time.Time
+	if !live {
+		id := requestID()
+		if err := sendNode(binary.Node{
+			Tag: "iq",
+			Attrs: binary.Attrs{
+				"id": id, "type": "get", "xmlns": "batur.pair",
+				"to": "s.whatsapp.net",
+			},
+			Content: []binary.Node{{
+				Tag: "pair-device",
+				Attrs: binary.Attrs{
+					"device_id":   cfg.DeviceID,
+					"device_name": cfg.DeviceName,
+					"platform":    cfg.Platform,
+				},
+			}},
+		}); err != nil {
+			return nil, fmt.Errorf("pairing: pair-device: %w", err)
+		}
+		code, ref, expiresAt, err = waitForQR(waitCtx, conn, hs.recv, cfg.Dict, nil, &rest)
+	} else {
+		code, ref, expiresAt, err = waitForQR(waitCtx, conn, hs.recv, cfg.Dict, sendNode, &rest)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -160,7 +172,7 @@ func Pair(ctx context.Context, cfg PairingConfig) (*PairingResult, error) {
 		}
 	}
 
-	result, err := waitForCredentials(waitCtx, conn, hs.recv, cfg.Dict)
+	result, err := waitForCredentials(waitCtx, conn, hs.recv, cfg.Dict, &rest)
 	if err != nil {
 		return nil, err
 	}
@@ -352,9 +364,9 @@ func buildFinishPayload(cfg PairingConfig, noisePub []byte) []byte {
 	return blob
 }
 
-func waitForQR(ctx context.Context, conn transport.Conn, recv *noise.Cipher, dict *token.Dictionary) (code, ref string, expiresAt time.Time, err error) {
+func waitForQR(ctx context.Context, conn transport.Conn, recv *noise.Cipher, dict *token.Dictionary, ack func(binary.Node) error, rest *[]byte) (code, ref string, expiresAt time.Time, err error) {
 	for {
-		node, err := nextNode(ctx, conn, recv, dict)
+		node, err := nextNode(ctx, conn, recv, dict, rest)
 		if err != nil {
 			if ctx.Err() != nil {
 				return "", "", time.Time{}, ErrPairingTimeout
@@ -388,14 +400,19 @@ func waitForQR(ctx context.Context, conn transport.Conn, recv *noise.Cipher, dic
 			}
 		}
 		if code != "" && ref != "" {
+			if ack != nil {
+				if err := ack(ackIQ(node)); err != nil {
+					return "", "", time.Time{}, err
+				}
+			}
 			return code, ref, expiresAt, nil
 		}
 	}
 }
 
-func waitForCredentials(ctx context.Context, conn transport.Conn, recv *noise.Cipher, dict *token.Dictionary) (*PairingResult, error) {
+func waitForCredentials(ctx context.Context, conn transport.Conn, recv *noise.Cipher, dict *token.Dictionary, rest *[]byte) (*PairingResult, error) {
 	for {
-		node, err := nextNode(ctx, conn, recv, dict)
+		node, err := nextNode(ctx, conn, recv, dict, rest)
 		if err != nil {
 			if ctx.Err() != nil {
 				return nil, ErrPairingTimeout
@@ -413,6 +430,37 @@ func waitForCredentials(ctx context.Context, conn transport.Conn, recv *noise.Ci
 	}
 }
 
+func takeFrame(raw []byte) (frame, rest []byte) {
+	if len(raw) < 4 {
+		return raw, nil
+	}
+	n := int(raw[0])<<16 | int(raw[1])<<8 | int(raw[2])
+	if n <= 0 || 3+n > len(raw) {
+		return raw, nil
+	}
+	return raw[3 : 3+n], raw[3+n:]
+}
+
+func withLen(payload []byte) []byte {
+	n := len(payload)
+	out := make([]byte, 3+n)
+	out[0] = byte(n >> 16)
+	out[1] = byte(n >> 8)
+	out[2] = byte(n)
+	copy(out[3:], payload)
+	return out
+}
+
+func ackIQ(n binary.Node) binary.Node {
+	return binary.Node{
+		Tag: "iq",
+		Attrs: binary.Attrs{
+			"id": n.MustStringAttr("id"), "type": "result",
+			"to": n.MustStringAttr("from"),
+		},
+	}
+}
+
 func findIQChild(node binary.Node, tag string) (binary.Node, bool) {
 	if node.Tag != "iq" {
 		return binary.Node{}, false
@@ -424,18 +472,26 @@ func findIQChild(node binary.Node, tag string) (binary.Node, bool) {
 	return node.ChildByTag(tag)
 }
 
-func nextNode(ctx context.Context, conn transport.Conn, recv *noise.Cipher, dict *token.Dictionary) (binary.Node, error) {
-	raw, err := conn.ReceiveBinary(ctx)
-	if err != nil {
-		return binary.Node{}, fmt.Errorf("pairing: receive: %w", err)
-	}
-	if liveConn(conn) && len(raw) > 3 {
-		n := int(raw[0])<<16 | int(raw[1])<<8 | int(raw[2])
-		if n == len(raw)-3 {
-			raw = raw[3:]
+func nextNode(ctx context.Context, conn transport.Conn, recv *noise.Cipher, dict *token.Dictionary, rest *[]byte) (binary.Node, error) {
+	var raw []byte
+	var err error
+	if rest != nil && len(*rest) > 0 {
+		raw = *rest
+		*rest = nil
+	} else {
+		raw, err = conn.ReceiveBinary(ctx)
+		if err != nil {
+			return binary.Node{}, fmt.Errorf("pairing: receive: %w", err)
 		}
 	}
-	plain, err := recv.Open(nil, raw)
+	if bytes.Equal(raw, []byte{0x88, 0x02, 0x03, 0xf3}) {
+		return binary.Node{}, fmt.Errorf("%w: server closed the socket (880203f3)", ErrPairingFailed)
+	}
+	part, more := takeFrame(raw)
+	if rest != nil && len(more) > 0 {
+		*rest = append((*rest)[:0], more...)
+	}
+	plain, err := recv.Open(nil, part)
 	if err != nil {
 		n := len(raw)
 		if n > 64 {

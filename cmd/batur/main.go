@@ -16,6 +16,7 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/signal"
 	"runtime"
@@ -527,6 +528,18 @@ func serve() error {
 	return b.Stop(context.Background())
 }
 
+// whatsAppDial is the live WhatsApp Web control-socket dial: Origin plus
+// the "WA" + magic + dictionary-version prefix and 3-byte length frames.
+func whatsAppDial() ws.Options {
+	return ws.Options{
+		HandshakeTimeout: 30 * time.Second,
+		Header: http.Header{
+			"Origin": []string{"https://web.whatsapp.com"},
+		},
+		FramePrefix: []byte{'W', 'A', 6, byte(token.Default().Version)},
+	}
+}
+
 type fleetRec struct {
 	SessionID string `json:"session_id"`
 	Account   string `json:"account"`
@@ -575,7 +588,7 @@ func pair() error {
 	deviceID := fs.String("device-id", "", "unique device identifier (auto-generated if empty)")
 	deviceName := fs.String("device-name", "batur", "device display name")
 	platform := fs.String("platform", "web", "platform identifier (web, desktop, etc.)")
-	edgeServer := fs.String("edge", "wss://web.whatsapp.com/ws", "edge WebSocket URL")
+	edgeServer := fs.String("edge", "wss://web.whatsapp.com/ws/chat", "edge WebSocket URL")
 	dataDir := fs.String("data", "", "session data directory (same flag as serve; empty = in-memory)")
 	mock := fs.Bool("mock", false, "pair against an in-process mock server (no network)")
 	qrWait := fs.Duration("qr-timeout", 5*time.Minute, "how long to wait for the QR scan")
@@ -619,7 +632,10 @@ func pair() error {
 		auth = session.TrustedRootAuth(srv.RootPub())
 		edge = "mock://pair"
 	} else {
-		dialer = ws.NewDialer(ws.Options{HandshakeTimeout: 30 * time.Second})
+		dialer = ws.NewDialer(whatsAppDial())
+		if edge == "" || edge == "wss://web.whatsapp.com/ws" {
+			edge = "wss://web.whatsapp.com/ws/chat"
+		}
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())

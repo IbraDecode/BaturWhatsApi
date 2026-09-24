@@ -135,7 +135,7 @@ func Verify(certChain []byte, serverStatic []byte, rootPubKey ed25519.PublicKey,
 	if len(rootPubKey) != ed25519.PublicKeySize {
 		return errors.New("wacert: bad trust anchor length")
 	}
-	if !ed25519.Verify(rootPubKey, inter.Details, inter.Signature) {
+	if !verifyEither(rootPubKey, inter.Details, inter.Signature) {
 		return fmt.Errorf("%w: intermediate", ErrBadSig)
 	}
 	interD, err := parseDetails(inter.Details)
@@ -148,8 +148,7 @@ func Verify(certChain []byte, serverStatic []byte, rootPubKey ed25519.PublicKey,
 	if err := checkValidity(interD, now); err != nil {
 		return fmt.Errorf("intermediate: %w", err)
 	}
-	interKey := ed25519.PublicKey(interD.Key)
-	if !ed25519.Verify(interKey, leaf.Details, leaf.Signature) {
+	if !verifyEither(interD.Key, leaf.Details, leaf.Signature) {
 		return fmt.Errorf("%w: leaf", ErrBadSig)
 	}
 	leafD, err := parseDetails(leaf.Details)
@@ -185,4 +184,17 @@ func BuildDetails(serial, issuerSerial uint32, key []byte, notBefore, notAfter t
 		Uint(4, uint64(notBefore.Unix())).
 		Uint(5, uint64(notAfter.Unix())).
 		Build()
+}
+
+// verifyEither accepts a raw Ed25519 signature or an XEdDSA signature over a
+// Curve25519 (Montgomery) public key. Live WhatsApp certs use the latter;
+// the mock server uses the former.
+func verifyEither(pub, msg, sig []byte) bool {
+	if len(pub) != 32 || len(sig) != ed25519.SignatureSize {
+		return false
+	}
+	if ed25519.Verify(pub, msg, sig) {
+		return true
+	}
+	return verifyXEdDSA(pub, msg, sig)
 }

@@ -19,6 +19,7 @@ import (
 
 	"github.com/ibradecode/baturwhatsapi/internal/wapb"
 	"github.com/ibradecode/baturwhatsapi/protocol/binary"
+	"github.com/ibradecode/baturwhatsapi/protocol/pb"
 	"github.com/ibradecode/baturwhatsapi/protocol/token"
 	"github.com/ibradecode/baturwhatsapi/security/noise"
 	"github.com/ibradecode/baturwhatsapi/transport"
@@ -110,7 +111,11 @@ func Pair(ctx context.Context, cfg PairingConfig) (*PairingResult, error) {
 	}
 	defer conn.Close()
 
-	hs, err := handshake(ctx, conn, noiseKP, cfg.ServerAuth, buildFinishPayload(cfg, noiseKP.Public()))
+	payload := buildFinishPayload(cfg, noiseKP.Public())
+	if liveConn(conn) {
+		payload = liveClientPayload()
+	}
+	hs, err := handshake(ctx, conn, noiseKP, cfg.ServerAuth, payload)
 	if err != nil {
 		return nil, err
 	}
@@ -169,6 +174,35 @@ func Pair(ctx context.Context, cfg PairingConfig) (*PairingResult, error) {
 	return result, nil
 }
 
+// clientHelloFrame builds the opening handshake. The mock uses the
+// engine's historical field 1; live WhatsApp Web uses field 2.
+func clientHelloFrame(live bool, ephemeral []byte) []byte {
+	inner := (&wapb.ClientHello{Ephemeral: ephemeral}).Build()
+	field := uint32(wapb.HSFieldClientHello)
+	if live {
+		field = 2
+	}
+	return wapb.WrapTop(field, inner)
+}
+
+func unwrapHello(data []byte, live bool) (pb.Message, error) {
+	field := uint32(wapb.HSFieldServerHello)
+	if live {
+		field = 3
+	}
+	return wapb.UnwrapTop(data, field)
+}
+
+// prologue is the extra Noise prologue. The mock shares a synthetic
+// binding header; the live socket uses the pattern alone (nil).
+func prologue(conn transport.Conn) []byte {
+	h := conn.BindingHeader()
+	if len(h) >= 4 && string(h[:4]) == "GET " {
+		return nil
+	}
+	return h
+}
+
 type hsResult struct {
 	send         *noise.Cipher
 	recv         *noise.Cipher
@@ -176,7 +210,12 @@ type hsResult struct {
 }
 
 func handshake(ctx context.Context, conn transport.Conn, staticKP *noise.KeyPair, serverAuth func(static, payload []byte) error, finishPayload []byte) (*hsResult, error) {
-	xx, err := noise.NewXXClient(staticKP, conn.BindingHeader())
+	pro := prologue(conn)
+	live := len(conn.BindingHeader()) >= 4 && string(conn.BindingHeader()[:4]) == "GET "
+	if live {
+		pro = []byte{'W', 'A', 6, 3}
+	}
+	xx, err := noise.NewXXClient(staticKP, pro)
 	if err != nil {
 		return nil, err
 	}
@@ -184,7 +223,7 @@ func handshake(ctx context.Context, conn transport.Conn, staticKP *noise.KeyPair
 	if err != nil {
 		return nil, err
 	}
-	hello := wapb.WrapTop(wapb.HSFieldClientHello, (&wapb.ClientHello{Ephemeral: ephC}).Build())
+	hello := clientHelloFrame(live, ephC)
 	if err := conn.SendBinary(ctx, hello); err != nil {
 		return nil, err
 	}
@@ -192,9 +231,16 @@ func handshake(ctx context.Context, conn transport.Conn, staticKP *noise.KeyPair
 	if err != nil {
 		return nil, fmt.Errorf("pairing: server hello: %w", err)
 	}
-	shMsg, err := wapb.UnwrapTop(resp, wapb.HSFieldServerHello)
+	if live && len(resp) >= 3 && resp[0] == 0 && resp[1] == 1 {
+		resp = resp[3:]
+	}
+	shMsg, err := unwrapHello(resp, live)
 	if err != nil || shMsg == nil {
-		return nil, fmt.Errorf("pairing: missing server hello")
+		n := len(resp)
+		if n > 48 {
+			n = 48
+		}
+		return nil, fmt.Errorf("pairing: missing server hello (%d bytes, head %x)", len(resp), resp[:n])
 	}
 	sh, err := wapb.ParseServerHello(shMsg)
 	if err != nil || len(sh.Ephemeral) != 32 || len(sh.Static) == 0 {
@@ -211,7 +257,11 @@ func handshake(ctx context.Context, conn transport.Conn, staticKP *noise.KeyPair
 	if err != nil {
 		return nil, err
 	}
-	finish := wapb.WrapTop(wapb.HSFieldClientFinish, (&wapb.ClientFinish{Static: clientStaticCT, Payload: clientPayloadCT}).Build())
+	finishField := uint32(wapb.HSFieldClientFinish)
+	if live {
+		finishField = 4
+	}
+	finish := wapb.WrapTop(finishField, (&wapb.ClientFinish{Static: clientStaticCT, Payload: clientPayloadCT}).Build())
 	if err := conn.SendBinary(ctx, finish); err != nil {
 		return nil, err
 	}
@@ -220,6 +270,38 @@ func handshake(ctx context.Context, conn transport.Conn, staticKP *noise.KeyPair
 		return nil, err
 	}
 	return &hsResult{send: send, recv: recv, serverStatic: serverStatic}, nil
+}
+
+// liveClientPayload is the minimal ClientPayload WhatsApp Web accepts
+// before it will emit a pairing QR. Field numbers follow the public
+// WAWeb protobuf schema (userAgent=5, webInfo=6, connectReason=13).
+func liveClientPayload() []byte {
+	app := pb.NewBuilder().Uint(1, 2).Uint(2, 3000).Uint(3, 1048321180).Build()
+	ua := pb.NewBuilder().
+		Uint(1, 14).
+		Bytes(2, app).
+		Bytes(3, []byte("000")).
+		Bytes(4, []byte("000")).
+		Bytes(5, []byte("0.1.0")).
+		Bytes(7, []byte("Desktop")).
+		Bytes(8, []byte("0.1.0")).
+		Uint(10, 0).
+		Bytes(11, []byte("en")).
+		Bytes(12, []byte("US")).
+		Build()
+	web := pb.NewBuilder().Uint(4, 0).Build()
+	return pb.NewBuilder().
+		Bool(3, false).
+		Bytes(5, ua).
+		Bytes(6, web).
+		Uint(12, 1).
+		Uint(13, 1).
+		Build()
+}
+
+func liveConn(conn transport.Conn) bool {
+	h := conn.BindingHeader()
+	return len(h) >= 4 && string(h[:4]) == "GET "
 }
 
 func buildFinishPayload(cfg PairingConfig, noisePub []byte) []byte {
@@ -290,9 +372,16 @@ func nextNode(ctx context.Context, conn transport.Conn, recv *noise.Cipher, dict
 	if err != nil {
 		return binary.Node{}, fmt.Errorf("pairing: receive: %w", err)
 	}
+	if len(raw) <= 8 && len(raw) >= 3 && raw[0] == 0x88 {
+		return binary.Node{}, fmt.Errorf("pairing: server refused handshake (%x)", raw)
+	}
 	plain, err := recv.Open(nil, raw)
 	if err != nil {
-		return binary.Node{}, fmt.Errorf("pairing: decrypt: %w", err)
+		n := len(raw)
+		if n > 24 {
+			n = 24
+		}
+		return binary.Node{}, fmt.Errorf("pairing: decrypt (%d bytes, head %x): %w", len(raw), raw[:n], err)
 	}
 	node, err := binary.Decode(dict, plain)
 	if err != nil {

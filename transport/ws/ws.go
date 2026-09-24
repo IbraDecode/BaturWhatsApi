@@ -46,6 +46,14 @@ type Options struct {
 	TLSConfig *tls.Config
 	// HandshakeTimeout caps the opening handshake (default 30s).
 	HandshakeTimeout time.Duration
+	// FramePrefix, when set, is written once before the first binary
+	// payload and stripped from inbound frames. WhatsApp Web uses
+	// "WA" + magic + dictionary version.
+	FramePrefix []byte
+	// LengthPrefix frames each payload as a 3-byte big-endian length
+	// followed by that many bytes, packed inside one WebSocket message.
+	// Required by the WhatsApp Web control socket.
+	LengthPrefix bool
 }
 
 type Dialer struct {
@@ -123,6 +131,9 @@ func (d *Dialer) Dial(ctx context.Context, rawURL string) (transport.Conn, error
 	var req strings.Builder
 	fmt.Fprintf(&req, "GET %s HTTP/1.1\r\nHost: %s\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n", reqPath, host)
 	fmt.Fprintf(&req, "Sec-WebSocket-Key: %s\r\nSec-WebSocket-Version: 13\r\n", wsKey)
+	if d.Options.Header == nil || d.Options.Header.Get("Origin") == "" {
+		fmt.Fprintf(&req, "Origin: https://web.whatsapp.com\r\n")
+	}
 	for k, vs := range d.Options.Header {
 		for _, v := range vs {
 			fmt.Fprintf(&req, "%s: %s\r\n", k, v)
@@ -182,6 +193,8 @@ func (d *Dialer) Dial(ctx context.Context, rawURL string) (transport.Conn, error
 	// saw; both ends reconstruct the same byte string for noise binding.
 	binding := []byte(fmt.Sprintf("GET %s HTTP/1.1\r\nHost: %s\r\n%s\r\n", reqPath, host, strings.TrimSpace(statusLine)))
 	c := newConn(conn, br, binding, true)
+	c.framePrefix = append([]byte(nil), d.Options.FramePrefix...)
+	c.lengthPrefix = d.Options.LengthPrefix
 	go c.readLoop()
 	return c, nil
 }
@@ -197,9 +210,12 @@ type Conn struct {
 	isClosed bool
 	closeCh  chan struct{}
 	frames   chan []byte
-	errMu    sync.Mutex
-	lastErr  error
-	header   []byte
+	errMu        sync.Mutex
+	lastErr      error
+	header       []byte
+	framePrefix  []byte
+	prefixSent   bool
+	lengthPrefix bool
 }
 
 func newConn(nc net.Conn, br *bufio.Reader, binding []byte, clientSide bool) *Conn {
@@ -219,7 +235,27 @@ func (c *Conn) BindingHeader() []byte { return c.header }
 
 // SendBinary writes a single binary frame (masked for clients).
 func (c *Conn) SendBinary(ctx context.Context, payload []byte) error {
-	return c.writeFrame(ctx, 0x2, payload)
+	body := payload
+	if c.lengthPrefix || len(c.framePrefix) > 0 {
+		n := len(payload)
+		if n > 0xFFFFFF {
+			return ErrFrameTooLarge
+		}
+		var head []byte
+		if len(c.framePrefix) > 0 && !c.prefixSent {
+			head = c.framePrefix
+			c.prefixSent = true
+		}
+		framed := make([]byte, len(head)+3+n)
+		copy(framed, head)
+		off := len(head)
+		framed[off] = byte(n >> 16)
+		framed[off+1] = byte(n >> 8)
+		framed[off+2] = byte(n)
+		copy(framed[off+3:], payload)
+		body = framed
+	}
+	return c.writeFrame(ctx, 0x2, body)
 }
 
 // SendText writes a single text frame.
@@ -403,10 +439,12 @@ func (c *Conn) readLoop() {
 				return
 			}
 			if msg != nil {
-				select {
-				case c.frames <- msg:
-				case <-c.closeCh:
-					return
+				for _, part := range c.splitFrames(msg) {
+					select {
+					case c.frames <- part:
+					case <-c.closeCh:
+						return
+					}
 				}
 			}
 		default:
@@ -414,6 +452,32 @@ func (c *Conn) readLoop() {
 			return
 		}
 	}
+}
+
+// splitFrames unwraps the optional 3-byte length prefix. Without it the
+// WebSocket payload is one frame.
+func (c *Conn) splitFrames(msg []byte) [][]byte {
+	if !c.lengthPrefix {
+		return [][]byte{msg}
+	}
+	// A 4-byte reply with no room for a payload is a server error code
+	// (for example 88 02 03 f3), not a length-prefixed frame.
+	if len(msg) == 4 {
+		c.fail(fmt.Errorf("ws: server error code %x", msg))
+		return nil
+	}
+	var out [][]byte
+	for len(msg) >= 3 {
+		n := int(msg[0])<<16 | int(msg[1])<<8 | int(msg[2])
+		msg = msg[3:]
+		if n > len(msg) || n > MaxFrameSize {
+			c.fail(fmt.Errorf("%w: length-prefix n=%d remain=%d head=%x", ErrFrameTooLarge, n, len(msg), msg[:min(8, len(msg))]))
+			return out
+		}
+		out = append(out, append([]byte(nil), msg[:n]...))
+		msg = msg[n:]
+	}
+	return out
 }
 
 // accumulate merges fragmented data frames.
@@ -479,7 +543,7 @@ func (c *Conn) readFrame() (frame, error) {
 		}
 	}
 	if length > MaxFrameSize {
-		return frame{}, ErrFrameTooLarge
+		return frame{}, fmt.Errorf("%w: hdr=%02x%02x declared=%d", ErrFrameTooLarge, hdr[0], hdr[1], length)
 	}
 	var key [4]byte
 	if !c.masked {
